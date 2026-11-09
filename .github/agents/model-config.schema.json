@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentModelConfig",
+  "description": "Schema for .github/agents/model-config.json — defines approved models, tier mappings, and per-agent model assignments.",
+  "type": "object",
+  "required": [
+    "approvedModels",
+    "tiers",
+    "agents"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference URI."
+    },
+    "_comment": {
+      "type": "string",
+      "description": "Human-readable comment; not processed by tooling."
+    },
+    "approvedModels": {
+      "type": "object",
+      "description": "Registry of approved model keys and their concrete model names. Tiers reference these keys. Keep names in sync with GitHub Settings → Copilot → Models.",
+      "minProperties": 1,
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "availableModels": {
+      "type": "array",
+      "description": "Optional approvedModels keys the target host offers. When set, --strict requires the first model of every tier to be in this list, because the Copilot SDK/CLI host uses only the first entry and never falls back.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "tiers": {
+      "type": "object",
+      "description": "Named tiers that reference one approvedModels key or an ordered list of keys. The sync script validates registry membership and resolves keys to model names.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "agents": {
+      "type": "array",
+      "description": "Per-agent model assignments.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "anyOf": [
+          { "required": ["tier"] },
+          { "required": ["primary"] }
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent identifier; must match the basename of the corresponding {name}.agent.md file (without extension)."
+          },
+          "tier": {
+            "type": "string",
+            "description": "Key of the tier (defined in 'tiers') whose model list this agent uses."
+          },
+          "primary": {
+            "type": "string",
+            "description": "Older name for 'tier': key of the tier (defined in 'tiers') to use for this agent. 'tier' wins when both are set."
+          },
+          "thinkingEffort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "description": "Optional thinking-effort hint written to agent frontmatter alongside the model."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Free-text description of this agent's role. Not written to agent files."
+          }
+        }
+      }
+    }
+  }
+}

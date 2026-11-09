@@ -1,0 +1,11 @@
+{
+  "generator": "create-adlc",
+  "version": "0.3.0",
+  "modules": {
+    "backend": "node-ts",
+    "frontend": "react",
+    "test": "playwright",
+    "tracker": "github",
+    "scm": "github"
+  }
+}

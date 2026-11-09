@@ -1,0 +1,9 @@
+{
+  "runner": "playwright",
+  "project": "src/pantry-pal.E2ETests",
+  "testFileGlobs": [
+    "src/pantry-pal.E2ETests/**/*.spec.ts"
+  ],
+  "sourceGlobs": [],
+  "timeoutSeconds": 900
+}

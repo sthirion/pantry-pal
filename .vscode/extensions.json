@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "GitHub.copilot-chat",
+    "dbaeumer.vscode-eslint",
+    "ms-playwright.playwright"
+  ]
+}

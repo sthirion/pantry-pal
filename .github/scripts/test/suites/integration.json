@@ -1,0 +1,11 @@
+{
+  "runner": "vitest",
+  "project": "src/pantry-pal",
+  "testFileGlobs": [
+    "src/pantry-pal/**/*.spec.ts"
+  ],
+  "sourceGlobs": [
+    "src/pantry-pal/src/**/*.ts"
+  ],
+  "timeoutSeconds": 600
+}
