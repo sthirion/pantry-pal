@@ -1,0 +1,10 @@
+.github/*
+!.github/workflows
+.vscode/
+scratchpad/
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+package-lock.json

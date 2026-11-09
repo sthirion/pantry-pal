@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # Exit 4 ("RESULT NONE", nothing ran) passes only while no tracked file matches the suite's testFileGlobs.
+      - name: Test (unit)
+        run: |
+          set +e
+          node .github/scripts/test/test.mjs unit --scope all
+          code=$?
+          if [ "$code" -eq 4 ] && [ -z "$(git ls-files ':(glob)src/pantry-pal/**/*.test.ts' ':(glob)src/pantry-pal.Shared/**/*.test.ts')" ]; then
+            echo "No unit test files yet: exit 4 accepted."
+            exit 0
+          fi
+          exit $code
+
+      - name: Test (integration)
+        run: |
+          set +e
+          node .github/scripts/test/test.mjs integration --scope all
+          code=$?
+          if [ "$code" -eq 4 ] && [ -z "$(git ls-files ':(glob)src/pantry-pal/**/*.spec.ts')" ]; then
+            echo "No integration test files yet: exit 4 accepted."
+            exit 0
+          fi
+          exit $code
+
+      - name: Test (frontend)
+        run: |
+          set +e
+          node .github/scripts/test/test.mjs frontend --scope all
+          code=$?
+          if [ "$code" -eq 4 ] && [ -z "$(git ls-files ':(glob)src/pantry-pal.Frontend/**/*.test.ts' ':(glob)src/pantry-pal.Frontend/**/*.test.tsx' ':(glob)src/pantry-pal.Frontend/**/*.spec.ts' ':(glob)src/pantry-pal.Frontend/**/*.spec.tsx')" ]; then
+            echo "No frontend test files yet: exit 4 accepted."
+            exit 0
+          fi
+          exit $code
+
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=high

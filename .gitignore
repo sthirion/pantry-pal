@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+src/pantry-pal/data/
+*.tsbuildinfo
+
+# Local-only, never committed
+scratchpad/
+.github/memorybank/features

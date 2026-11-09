@@ -1,11 +1,14 @@
 {
   "runner": "vitest",
-  "project": "src/pantry-pal",
+  "project": ".",
+  "config": "vitest.unit.config.ts",
   "testFileGlobs": [
-    "src/pantry-pal/**/*.test.ts"
+    "src/pantry-pal/**/*.test.ts",
+    "src/pantry-pal.Shared/**/*.test.ts"
   ],
   "sourceGlobs": [
-    "src/pantry-pal/src/**/*.ts"
+    "src/pantry-pal/src/**/*.ts",
+    "src/pantry-pal.Shared/src/**/*.ts"
   ],
   "timeoutSeconds": 600
 }
