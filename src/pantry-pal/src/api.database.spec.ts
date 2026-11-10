@@ -64,6 +64,39 @@ const EXPECTED_COLUMNS: Record<string, Col[]> = {
     ['id', 'INTEGER', 1, 1],
     ['value', 'INTEGER', 1, 0],
   ],
+  session: [
+    ['id', 'TEXT', 1, 1],
+    ['expires_at', 'INTEGER', 1, 0],
+    ['token', 'TEXT', 1, 0],
+    ['created_at', 'INTEGER', 1, 0],
+    ['updated_at', 'INTEGER', 1, 0],
+    ['ip_address', 'TEXT', 0, 0],
+    ['user_agent', 'TEXT', 0, 0],
+    ['user_id', 'TEXT', 1, 0],
+  ],
+  account: [
+    ['id', 'TEXT', 1, 1],
+    ['account_id', 'TEXT', 1, 0],
+    ['provider_id', 'TEXT', 1, 0],
+    ['user_id', 'TEXT', 1, 0],
+    ['access_token', 'TEXT', 0, 0],
+    ['refresh_token', 'TEXT', 0, 0],
+    ['id_token', 'TEXT', 0, 0],
+    ['access_token_expires_at', 'INTEGER', 0, 0],
+    ['refresh_token_expires_at', 'INTEGER', 0, 0],
+    ['scope', 'TEXT', 0, 0],
+    ['password', 'TEXT', 0, 0],
+    ['created_at', 'INTEGER', 1, 0],
+    ['updated_at', 'INTEGER', 1, 0],
+  ],
+  verification: [
+    ['id', 'TEXT', 1, 1],
+    ['identifier', 'TEXT', 1, 0],
+    ['value', 'TEXT', 1, 0],
+    ['expires_at', 'INTEGER', 1, 0],
+    ['created_at', 'INTEGER', 1, 0],
+    ['updated_at', 'INTEGER', 1, 0],
+  ],
 };
 
 interface IndexShape {
@@ -75,6 +108,28 @@ interface IndexShape {
 const EXPECTED_INDEXES: Record<string, Record<string, IndexShape>> = {
   user: {
     user_email_unique: { unique: true, partial: false, columns: ['email'] },
+  },
+  session: {
+    session_token_unique: { unique: true, partial: false, columns: ['token'] },
+    session_user_id_idx: {
+      unique: false,
+      partial: false,
+      columns: ['user_id'],
+    },
+  },
+  account: {
+    account_user_id_idx: {
+      unique: false,
+      partial: false,
+      columns: ['user_id'],
+    },
+  },
+  verification: {
+    verification_identifier_idx: {
+      unique: false,
+      partial: false,
+      columns: ['identifier'],
+    },
   },
   household_member: {
     household_member_user_id_unique: {
@@ -161,7 +216,7 @@ function insertItem(
 }
 
 describe('AC-1 fresh database boot and health', () => {
-  it('Boot_WithFreshDbPath_CreatesExactlyTheEightTables', () => {
+  it('Boot_WithFreshDbPath_CreatesExactlyTheElevenTables', () => {
     // Given a freshly booted app on an empty DB_PATH
     const db = openReadonly(ctx.h.dbPath);
 
@@ -169,7 +224,7 @@ describe('AC-1 fresh database boot and health', () => {
     const tables = appTables(db);
     db.close();
 
-    // Then exactly the 8 application tables exist
+    // Then exactly the 11 application tables exist
     expect(tables).toEqual(Object.keys(EXPECTED_COLUMNS).sort());
   });
 
@@ -225,11 +280,13 @@ describe('AC-1 fresh database boot and health', () => {
     );
     db.close();
 
-    // Then exactly the three required foreign keys exist
+    // Then exactly the required foreign keys exist
     expect(fks.sort()).toEqual([
+      'account.user_id->user.id',
       'household_member.household_id->household.id',
       'household_member.user_id->user.id',
       'list_item.list_id->shopping_list.id',
+      'session.user_id->user.id',
     ]);
   });
 
@@ -311,7 +368,7 @@ describe('AC-1 fresh database boot and health', () => {
     // Then change_counter has exactly {1, 0} and every other table is empty
     expect(counter).toEqual([{ id: 1, value: 0 }]);
     expect(counts.every(([, n]) => n === 0)).toBe(true);
-    expect(counts).toHaveLength(7);
+    expect(counts).toHaveLength(10);
   });
 
   it('GetHealth_WithoutAuthentication_Returns200Ok', async () => {

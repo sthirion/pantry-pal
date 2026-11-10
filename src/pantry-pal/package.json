@@ -9,11 +9,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "admin": "node dist/cli.js",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
     "@pantry-pal/shared": "^0.0.0",
+    "better-auth": "^1.7.20",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.17",

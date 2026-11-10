@@ -11,8 +11,15 @@ import { HTTPException } from 'hono/http-exception';
 import { afterEach, beforeEach } from 'vitest';
 import { deleteItemsBodySchema, putListBodySchema } from '@pantry-pal/shared';
 import { createApp } from './app.js';
+import type { Auth } from './auth.js';
 import { loadConfig } from './config.js';
-import { createDatabase, openSqlite, runMigrations } from './db/database.js';
+import {
+  createDatabase,
+  openSqlite,
+  runMigrations,
+  type AppDatabase,
+} from './db/database.js';
+import { requireHousehold, requireSession } from './middleware.js';
 import { parseJsonBody } from './validation.js';
 
 export const ORIGIN = 'https://pantry.thirion.org';
@@ -37,12 +44,30 @@ export interface Harness {
   tmp: string;
   /** The connection the app itself uses (opened by `openSqlite`). */
   sqlite: Database.Database;
+  /** Drizzle handle on the same connection. */
+  db: AppDatabase;
   /** Number of times a test-only echo handler actually ran. */
   calls: { echo: number };
   stop: () => Promise<void>;
 }
 
-function registerTestRoutes(app: Hono, calls: { echo: number }): void {
+function registerTestRoutes(
+  app: Hono,
+  calls: { echo: number },
+  deps: { auth?: Auth; db?: AppDatabase },
+): void {
+  if (deps.auth && deps.db) {
+    app.get(
+      '/api/test/guarded',
+      requireSession(deps.auth),
+      requireHousehold(deps.db),
+      (c) =>
+        c.json({ userId: c.get('user').id, householdId: c.get('householdId') }),
+    );
+    app.get('/api/test/session-only', requireSession(deps.auth), (c) =>
+      c.json({ userId: c.get('user').id }),
+    );
+  }
   app.get('/api/test/throw', () => {
     throw new Error('token=XYZ987');
   });
@@ -82,17 +107,21 @@ export async function boot(
   const config = loadConfig({
     DB_PATH: dbPath,
     PUBLIC_ORIGIN: ORIGIN,
+    BETTER_AUTH_SECRET: 'harness-secret-harness-secret-harness-secret',
     ...(withStatic && { STATIC_DIR: staticDir }),
     ...(production && { NODE_ENV: 'production' }),
   });
   const calls = { echo: 0 };
   const sqlite = openSqlite(config.dbPath);
   let server: Server | undefined;
+  let db: AppDatabase;
   try {
-    runMigrations(createDatabase(sqlite));
+    db = createDatabase(sqlite);
+    runMigrations(db);
     const app = createApp({
       config,
-      registerRoutes: (a) => registerTestRoutes(a, calls),
+      db,
+      registerRoutes: (a, deps) => registerTestRoutes(a, calls, deps),
     });
     server = serve({
       fetch: app.fetch,
@@ -113,6 +142,7 @@ export async function boot(
       staticDir,
       tmp,
       sqlite,
+      db,
       calls,
       stop: async () => {
         if (stopped) return;

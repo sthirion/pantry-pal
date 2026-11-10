@@ -14,6 +14,8 @@ const config: Config = {
   dbPath: ':memory:',
   staticDir: undefined,
   publicOrigin: ORIGIN,
+  authSecret: 'test-secret',
+  authUrl: ORIGIN,
   isProduction: false,
 };
 

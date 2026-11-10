@@ -8,7 +8,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
-/** Better Auth core `user` table; Better Auth wiring and its other tables arrive in story 5. */
+/** Better Auth core `user` table. Timestamps use `timestamp_ms` because Better Auth writes `Date`s. */
 export const user = sqliteTable(
   'user',
   {
@@ -19,10 +19,72 @@ export const user = sqliteTable(
       .notNull()
       .default(false),
     image: text('image'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (t) => [uniqueIndex('user_email_unique').on(t.email)],
+);
+
+/** Better Auth `session` table. */
+export const session = sqliteTable(
+  'session',
+  {
+    id: text('id').primaryKey(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    token: text('token').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    uniqueIndex('session_token_unique').on(t.token),
+    index('session_user_id_idx').on(t.userId),
+  ],
+);
+
+/** Better Auth `account` table (holds the credential password hash). */
+export const account = sqliteTable(
+  'account',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: integer('access_token_expires_at', {
+      mode: 'timestamp_ms',
+    }),
+    refreshTokenExpiresAt: integer('refresh_token_expires_at', {
+      mode: 'timestamp_ms',
+    }),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('account_user_id_idx').on(t.userId)],
+);
+
+/** Better Auth `verification` table (unused by the enabled endpoints, required by the adapter). */
+export const verification = sqliteTable(
+  'verification',
+  {
+    id: text('id').primaryKey(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('verification_identifier_idx').on(t.identifier)],
 );
 
 export const household = sqliteTable('household', {
