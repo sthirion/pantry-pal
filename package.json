@@ -1,0 +1,30 @@
+{
+  "name": "pantry-pal",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "src/pantry-pal",
+    "src/pantry-pal.Frontend",
+    "src/pantry-pal.Shared",
+    "src/pantry-pal.E2ETests"
+  ],
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "lint": "eslint . && prettier --check .",
+    "test": "vitest run --config=vitest.unit.config.ts && vitest run --config=vitest.integration.config.ts && vitest run --config=vitest.frontend.config.ts",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@vitest/coverage-v8": "3.2.4",
+    "eslint": "9.39.1",
+    "eslint-plugin-yml": "3.10.0",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.4",
+    "vitest": "3.2.4"
+  }
+}

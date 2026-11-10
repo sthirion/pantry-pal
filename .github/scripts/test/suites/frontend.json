@@ -1,6 +1,7 @@
 {
   "runner": "vitest",
-  "project": "src/pantry-pal.Frontend",
+  "project": ".",
+  "config": "vitest.frontend.config.ts",
   "testFileGlobs": [
     "src/pantry-pal.Frontend/**/*.test.ts",
     "src/pantry-pal.Frontend/**/*.test.tsx",
