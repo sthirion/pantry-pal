@@ -85,7 +85,7 @@ Delivers the shared types, Zod schemas and `nameKey`/`displayName` helpers, plus
 [x] Integration tests written
 [x] Code reviewed (test code)
 [x] Test cases registered (or skipped) — skipped: GitHub Issues has no test-case concept (`tracker-adapter.mjs` `createTestCases` throws); `tracker-testcases-api.json` (37 entries) not registered
-[ ] PR ready
+[x] PR ready — https://github.com/sthirion/pantry-pal/pull/20
 
 ## Review Gate Status
 
