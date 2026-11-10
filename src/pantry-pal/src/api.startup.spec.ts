@@ -111,6 +111,7 @@ describe('AC-3 real startup in production', () => {
     // When the real server starts
     started = startServer({
       NODE_ENV: 'production',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
       PORT: String(port),
       DB_PATH: dbPath,
       PUBLIC_ORIGIN: ORIGIN,

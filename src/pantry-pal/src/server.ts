@@ -8,6 +8,6 @@ export function startServer(env: NodeJS.ProcessEnv = process.env) {
   const config = loadConfig(env);
   const db = createDatabase(openSqlite(config.dbPath));
   runMigrations(db);
-  const app = createApp({ config });
+  const app = createApp({ config, db });
   return serve({ fetch: app.fetch, port: config.port, hostname: config.host });
 }

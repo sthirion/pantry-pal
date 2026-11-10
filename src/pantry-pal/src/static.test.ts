@@ -25,6 +25,8 @@ beforeAll(() => {
     dbPath: ':memory:',
     staticDir,
     publicOrigin: 'http://localhost:3100',
+    authSecret: 'test-secret',
+    authUrl: 'http://localhost:3100',
     isProduction: false,
   };
   app = createApp({ config });
@@ -115,6 +117,8 @@ describe('static serving', () => {
         dbPath: ':memory:',
         staticDir: empty,
         publicOrigin: 'http://localhost:3100',
+        authSecret: 'test-secret',
+        authUrl: 'http://localhost:3100',
         isProduction: false,
       },
     });

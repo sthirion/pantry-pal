@@ -64,6 +64,15 @@ export function forbiddenResponse(c: Context): Response {
   return errorResponse(c, ERROR_ROWS[403]!);
 }
 
+export function unauthenticatedResponse(c: Context): Response {
+  return errorResponse(c, ERROR_ROWS[401]!);
+}
+
+/** Project-format error for an upstream status (e.g. Better Auth); unknown statuses become 500. */
+export function errorResponseForStatus(c: Context, status: number): Response {
+  return errorResponse(c, ERROR_ROWS[status] ?? INTERNAL);
+}
+
 export function notFoundResponse(c: Context): Response {
   return errorResponse(c, ERROR_ROWS[404]!);
 }

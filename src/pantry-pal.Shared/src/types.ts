@@ -9,6 +9,11 @@ export type PutListBody = z.infer<typeof putListBodySchema>;
 export type PutItemBody = z.infer<typeof putItemBodySchema>;
 export type DeleteItemsBody = z.infer<typeof deleteItemsBodySchema>;
 
+export interface MeResponse {
+  user: { id: string; name: string; email: string };
+  household: { id: string; name: string };
+}
+
 export interface ShoppingList {
   id: string;
   name: string;
