@@ -3,16 +3,16 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "src/pantry-pal.Shared",
     "src/pantry-pal",
     "src/pantry-pal.Frontend",
-    "src/pantry-pal.Shared",
     "src/pantry-pal.E2ETests"
   ],
   "engines": {
     "node": ">=22 <23"
   },
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspaces && npm run typecheck --workspace=@pantry-pal/shared",
     "lint": "eslint . && prettier --check .",
     "test": "vitest run --config=vitest.unit.config.ts && vitest run --config=vitest.integration.config.ts && vitest run --config=vitest.frontend.config.ts",
     "format": "prettier --write ."

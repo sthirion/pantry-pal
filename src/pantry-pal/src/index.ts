@@ -1,1 +1,3 @@
-export const serviceName = 'pantry-pal';
+import { startServer } from './server.js';
+
+startServer();
