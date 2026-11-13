@@ -7,17 +7,30 @@ import type { Config } from './config.js';
 import type { AppDatabase } from './db/database.js';
 import { handleError, notFoundResponse } from './errors.js';
 import { originCheck } from './origin-check.js';
+import { HouseholdEventHub } from './realtime/household-event-hub.js';
+import { registerListRoutes } from './routes/lists.js';
+import { ListService } from './services/list-service.js';
 import { isApiPath, serveStatic } from './static.js';
 
 export interface AppOptions {
   config: Config;
   /** When set, authentication (/api/auth/*, /api/me) is mounted on this database. */
   db?: AppDatabase;
+  /** Receives the version of every applied write; defaults to a private hub. */
+  eventHub?: HouseholdEventHub;
+  /** Server clock in epoch milliseconds, for tests. */
+  now?: () => number;
   /** Lets tests (and later stories) mount routes before the 404/static fallback. */
   registerRoutes?: (app: Hono, deps: { auth?: Auth; db?: AppDatabase }) => void;
 }
 
-export function createApp({ config, db, registerRoutes }: AppOptions): Hono {
+export function createApp({
+  config,
+  db,
+  eventHub = new HouseholdEventHub(),
+  now,
+  registerRoutes,
+}: AppOptions): Hono {
   const app = new Hono();
 
   app.use(
@@ -39,7 +52,14 @@ export function createApp({ config, db, registerRoutes }: AppOptions): Hono {
 
   app.get('/api/health', (c) => c.json({ status: 'ok' }));
   const auth = db && createAuth(config, db);
-  if (auth && db) registerAuthRoutes(app, auth, db);
+  if (auth && db) {
+    registerAuthRoutes(app, auth, db);
+    registerListRoutes(app, {
+      auth,
+      db,
+      lists: new ListService(db, eventHub, now),
+    });
+  }
   registerRoutes?.(app, { auth, db });
 
   app.notFound((c) => {
