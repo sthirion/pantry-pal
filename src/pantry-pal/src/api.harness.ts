@@ -20,6 +20,7 @@ import {
   type AppDatabase,
 } from './db/database.js';
 import { requireHousehold, requireSession } from './middleware.js';
+import type { HouseholdEventHub } from './realtime/household-event-hub.js';
 import { parseJsonBody } from './validation.js';
 
 export const ORIGIN = 'https://pantry.thirion.org';
@@ -35,6 +36,10 @@ export interface HarnessOptions {
   withStatic?: boolean;
   /** Run with NODE_ENV=production (default false). */
   production?: boolean;
+  /** Hub the app publishes applied write versions to. */
+  eventHub?: HouseholdEventHub;
+  /** Fixed server clock in epoch milliseconds. */
+  now?: () => number;
 }
 
 export interface Harness {
@@ -101,7 +106,7 @@ export async function boot(
   tmp: string,
   options: HarnessOptions = {},
 ): Promise<Harness> {
-  const { withStatic = true, production = false } = options;
+  const { withStatic = true, production = false, eventHub, now } = options;
   const dbPath = path.join(tmp, 'data', 'pantry.db');
   const staticDir = path.join(tmp, 'public');
   const config = loadConfig({
@@ -121,6 +126,8 @@ export async function boot(
     const app = createApp({
       config,
       db,
+      eventHub,
+      now,
       registerRoutes: (a, deps) => registerTestRoutes(a, calls, deps),
     });
     server = serve({

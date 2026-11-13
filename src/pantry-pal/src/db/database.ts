@@ -8,6 +8,11 @@ import * as schema from './schema.js';
 
 export type AppDatabase = ReturnType<typeof createDatabase>;
 
+/** The handle passed to a `db.transaction` callback. */
+export type AppTransaction = Parameters<
+  Parameters<AppDatabase['transaction']>[0]
+>[0];
+
 export const migrationsFolder = path.join(apiRoot, 'drizzle');
 
 /** Opens the SQLite file (creating its parent directory) with the required pragmas. */
