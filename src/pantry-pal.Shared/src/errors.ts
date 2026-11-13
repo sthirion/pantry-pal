@@ -4,6 +4,7 @@ export type ApiErrorCode =
   | 'forbidden'
   | 'not_found'
   | 'name_taken'
+  | 'item_on_other_list'
   | 'rate_limited'
   | 'internal_error';
 
