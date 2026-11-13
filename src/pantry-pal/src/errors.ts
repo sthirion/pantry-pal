@@ -27,6 +27,27 @@ const INTERNAL: ErrorRow = {
   message: 'An unexpected error occurred.',
 };
 
+const ITEM_ON_OTHER_LIST: ErrorRow = {
+  status: 409,
+  code: 'item_on_other_list',
+  message: 'Item is on another list.',
+};
+
+/** Rows for statuses that carry more than one code; selected by `CodedHttpException.code`. */
+const CODED_ROWS: Partial<Record<ApiErrorCode, ErrorRow>> = {
+  item_on_other_list: ITEM_ON_OTHER_LIST,
+};
+
+/** An `HTTPException` whose body is chosen by code, for statuses shared by several codes. */
+export class CodedHttpException extends HTTPException {
+  constructor(
+    status: 409,
+    public readonly code: ApiErrorCode,
+  ) {
+    super(status);
+  }
+}
+
 const ERROR_ROWS: Record<number, ErrorRow> = {
   400: {
     status: 400,
@@ -83,7 +104,10 @@ export function handleError(err: unknown, c: Context): Response {
     return errorResponse(c, ERROR_ROWS[400]!, err.details);
   }
   if (err instanceof HTTPException) {
-    const row = ERROR_ROWS[err.status] ?? INTERNAL;
+    const row =
+      (err instanceof CodedHttpException ? CODED_ROWS[err.code] : undefined) ??
+      ERROR_ROWS[err.status] ??
+      INTERNAL;
     return errorResponse(
       c,
       row,
