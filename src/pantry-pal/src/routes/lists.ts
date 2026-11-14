@@ -11,24 +11,10 @@ import type { AppDatabase } from '../db/database.js';
 import { ValidationError } from '../errors.js';
 import { requireHousehold, requireSession } from '../middleware.js';
 import type { ListService } from '../services/list-service.js';
-import { parseJsonBody, parseWith } from '../validation.js';
+import { collect, parseJsonBody, parseWith } from '../validation.js';
 
 const listIdParamSchema = z.object({ listId: uuidSchema });
 const deleteQuerySchema = z.object({ changedAt: changedAtSchema });
-
-/** Runs a parser and appends its validation details instead of throwing, so every bad input is reported. */
-async function collect<T>(
-  details: ApiErrorDetail[],
-  parse: () => T | Promise<T>,
-): Promise<T | undefined> {
-  try {
-    return await parse();
-  } catch (err) {
-    if (!(err instanceof ValidationError)) throw err;
-    details.push(...err.details);
-    return undefined;
-  }
-}
 
 /** Mounts `PUT` and `DELETE /api/lists/:listId`, scoped to the session user's household. */
 export function registerListRoutes(

@@ -20,13 +20,14 @@ describe('shared types', () => {
       'forbidden',
       'not_found',
       'name_taken',
+      'item_on_other_list',
       'rate_limited',
       'internal_error',
     ];
     // @ts-expect-error unknown codes are not assignable
     const bad: ApiErrorCode = 'bad_request';
     const body: ApiError = { error: { code: codes[0]!, message: 'm' } };
-    expect(codes).toHaveLength(7);
+    expect(codes).toHaveLength(8);
     expect(bad).toBe('bad_request');
     expect(body.error.details).toBeUndefined();
   });

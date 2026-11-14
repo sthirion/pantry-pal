@@ -8,7 +8,9 @@ import type { AppDatabase } from './db/database.js';
 import { handleError, notFoundResponse } from './errors.js';
 import { originCheck } from './origin-check.js';
 import { HouseholdEventHub } from './realtime/household-event-hub.js';
+import { registerItemRoutes } from './routes/items.js';
 import { registerListRoutes } from './routes/lists.js';
+import { ItemService } from './services/item-service.js';
 import { ListService } from './services/list-service.js';
 import { isApiPath, serveStatic } from './static.js';
 
@@ -58,6 +60,11 @@ export function createApp({
       auth,
       db,
       lists: new ListService(db, eventHub, now),
+    });
+    registerItemRoutes(app, {
+      auth,
+      db,
+      items: new ItemService(db, eventHub, now),
     });
   }
   registerRoutes?.(app, { auth, db });
