@@ -10,8 +10,11 @@ import { originCheck } from './origin-check.js';
 import { HouseholdEventHub } from './realtime/household-event-hub.js';
 import { registerItemRoutes } from './routes/items.js';
 import { registerListRoutes } from './routes/lists.js';
+import { registerSyncRoutes } from './routes/sync.js';
 import { ItemService } from './services/item-service.js';
 import { ListService } from './services/list-service.js';
+import { SuggestionService } from './services/suggestion-service.js';
+import { SyncService } from './services/sync-service.js';
 import { isApiPath, serveStatic } from './static.js';
 
 export interface AppOptions {
@@ -65,6 +68,12 @@ export function createApp({
       auth,
       db,
       items: new ItemService(db, eventHub, now),
+    });
+    registerSyncRoutes(app, {
+      auth,
+      db,
+      sync: new SyncService(db),
+      suggestions: new SuggestionService(db),
     });
   }
   registerRoutes?.(app, { auth, db });

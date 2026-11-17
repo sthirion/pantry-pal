@@ -38,6 +38,17 @@ export interface Suggestion {
   lastUsedAt: string;
 }
 
+export interface SyncResponse {
+  version: number;
+  full: boolean;
+  lists: ShoppingList[];
+  items: ListItem[];
+}
+
+export interface SuggestionsResponse {
+  suggestions: Suggestion[];
+}
+
 export type OutboxMutation =
   | { id: string; kind: 'putList'; listId: string; body: PutListBody }
   | { id: string; kind: 'deleteList'; listId: string; changedAt: string }

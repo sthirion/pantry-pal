@@ -7,7 +7,13 @@ import {
   runMigrations,
   type AppDatabase,
 } from './db/database.js';
-import { account, household, user } from './db/schema.js';
+import {
+  account,
+  household,
+  shoppingList,
+  syncState,
+  user,
+} from './db/schema.js';
 
 let db: AppDatabase;
 let out: string[];
@@ -119,6 +125,38 @@ describe('runCli', () => {
       expect(prompted).toBe(0);
     },
   );
+
+  it('maintenance:daily purges old tombstones, reports counts and exits 0', async () => {
+    const old = Date.now() - 31 * 24 * 60 * 60 * 1000;
+    db.insert(shoppingList)
+      .values({
+        id: 'l1',
+        householdId: 'h1',
+        name: 'x',
+        nameKey: 'x',
+        version: 3,
+        createdAt: 1,
+        updatedAt: 1,
+        deletedAt: old,
+      })
+      .run();
+
+    const code = await runCli(['maintenance:daily'], db, io());
+
+    expect(code).toBe(0);
+    expect(out).toEqual([
+      'Purged 1 lists and 0 items deleted more than 30 days ago.',
+    ]);
+    expect(db.select().from(shoppingList).all()).toEqual([]);
+    expect(db.select().from(syncState).all()).toEqual([
+      { householdId: 'h1', purgedThroughVersion: 3 },
+    ]);
+  });
+
+  it('maintenance:daily rejects unexpected options', async () => {
+    expect(await runCli(['maintenance:daily', '--x', '1'], db, io())).toBe(1);
+    expect(err[0]).toContain('Usage');
+  });
 
   it('rejects an unknown command with usage', async () => {
     expect(await runCli(['nope'], db, io())).toBe(1);

@@ -60,6 +60,10 @@ const EXPECTED_COLUMNS: Record<string, Col[]> = {
     ['household_id', 'TEXT', 1, 1],
     ['purged_through_version', 'INTEGER', 1, 0],
   ],
+  maintenance_state: [
+    ['id', 'INTEGER', 1, 1],
+    ['last_run_at', 'INTEGER', 1, 0],
+  ],
   change_counter: [
     ['id', 'INTEGER', 1, 1],
     ['value', 'INTEGER', 1, 0],
@@ -224,7 +228,7 @@ describe('AC-1 fresh database boot and health', () => {
     const tables = appTables(db);
     db.close();
 
-    // Then exactly the 11 application tables exist
+    // Then exactly the 12 application tables exist
     expect(tables).toEqual(Object.keys(EXPECTED_COLUMNS).sort());
   });
 
@@ -368,7 +372,7 @@ describe('AC-1 fresh database boot and health', () => {
     // Then change_counter has exactly {1, 0} and every other table is empty
     expect(counter).toEqual([{ id: 1, value: 0 }]);
     expect(counts.every(([, n]) => n === 0)).toBe(true);
-    expect(counts).toHaveLength(10);
+    expect(counts).toHaveLength(11);
   });
 
   it('GetHealth_WithoutAuthentication_Returns200Ok', async () => {
