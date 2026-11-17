@@ -2,8 +2,7 @@
 name: requirements-review
 description: Review subagent that checks @requirements output for quality, completeness, and testability. Produces a standardized rating and recommends routing (approve, refine, or escalate). Read-only — never modifies files.
 model:
-  - GPT-5.6 Sol
-  - Claude Opus 5.5
+  - ollama-models/qwen3-coder:30b
 user-invocable: false
 tools:
   - search

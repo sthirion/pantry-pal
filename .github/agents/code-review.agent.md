@@ -2,8 +2,7 @@
 name: code-review
 description: Code review agent. Reviews changes for quality, security, SOLID principles, and project pattern consistency, and runs the project's test suites to catch regressions. Never modifies files — outputs a structured review report. Use after implementation or before creating a PR.
 model:
-  - GPT-5.6 Sol
-  - Claude Opus 5.5
+  - ollama-models/qwen3-coder:30b
 tools:
   - search
   - search/usages

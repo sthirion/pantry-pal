@@ -38,6 +38,7 @@
     "/^npm (ci|install)$/": true,
     "/^npm run (build|lint|typecheck)( (-w|--workspace) (@[\\w.-]+\\/)?[\\w.-]+)?$/": true,
     "/^npx prettier --write( [\\w./@-]+\\.(ts|tsx|js|jsx|mjs|cjs|astro|json|css|scss|md))+$/": true,
+    "/^npx eslint( [\\w./@-]+\\.(ts|tsx|js|jsx|mjs|cjs))+$/": true,
     "/^npx stryker run --incremental --mutate \"[^\"$`\\\\\\r\\n;&|]+\"$/": true,
     "/^node (-v|--version)$/": true,
     "/^npm view (@[\\w.-]+\\/)?[\\w.-]+ engines$/": true,

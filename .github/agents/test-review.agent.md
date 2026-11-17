@@ -2,8 +2,7 @@
 name: test-review
 description: Test adequacy reviewer. Judges whether the right tests were written — every changed behavior and every acceptance criterion covered by positive, negative, boundary, and authorization tests with assertions that would catch a regression — not whether coverage numbers are high. Read-only; produces a standardized rating. Used by @story as the gate for unit tests and for integration/E2E tests, and usable directly on your own branch.
 model:
-  - GPT-5.6 Sol
-  - Claude Opus 5.5
+  - ollama-models/qwen3-coder:30b
 tools:
   - search
   - search/usages

@@ -83,6 +83,8 @@ Handle the exit code of either command:
 
 ### Step 3: Confirm
 
+Verify the PR with `node .github/scripts/scm/scm.mjs pr-fetch <prId>` (auto-approved). Its heading shows draft or ready, and its description shows the work-item reference `pr-create` added (on GitHub, `Closes #<storyId>`). Never verify with `gh`, `az`, or another vendor CLI: those are not auto-approved and prompt the user.
+
 Output the PR URL and title, whether it is a draft or ready, and confirm the linked work item. As a subagent, end with exactly:
 
 ```markdown
