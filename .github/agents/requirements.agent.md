@@ -2,8 +2,7 @@
 name: requirements
 description: Requirements analyst and story refinement expert. Fetches user stories from the ticket tracker, extracts requirements and acceptance criteria, analyzes for ambiguities, asks clarifying questions, generates BDD acceptance test scenarios with test awareness by category, and creates or updates requirement stories in the tracker. Give me a work item ID, ask me to find/create a requirement, or ask me to refine a story.
 model:
-  - Claude Opus 5.5
-  - GPT-5.6 Sol
+  - ollama-models/qwen3-coder:30b
 tools:
   - github/get_issue
   - github/list_issues

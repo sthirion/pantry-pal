@@ -2,8 +2,7 @@
 name: plan
 description: Architecture and technical design agent. Read-only exploration of the codebase and libraries to produce technical designs, ADRs, and implementation patterns. Does not write code.
 model:
-  - Claude Opus 5.5
-  - GPT-5.6 Sol
+  - ollama-models/qwen3-coder:30b
 tools:
   - search
   - web/fetch

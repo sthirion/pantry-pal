@@ -2,6 +2,7 @@
   "$schema": "./model-config.schema.json",
   "_comment": "After editing, run `node .github/scripts/agents/set-agent-models.mjs --set` to apply changes to agent files.",
   "approvedModels": {
+    "qwen": "ollama-models/qwen3-coder:30b",
     "opus": "Claude Opus 5.5",
     "sonnet": "Claude Sonnet 5.5",
     "haiku": "Claude Haiku 5.5",
@@ -11,8 +12,7 @@
   },
   "tiers": {
     "strategic": [
-      "opus",
-      "sol"
+      "qwen"
     ],
     "standard": [
       "sonnet",
@@ -23,8 +23,7 @@
       "luna"
     ],
     "review": [
-      "sol",
-      "opus"
+      "qwen"
     ]
   },
   "agents": [

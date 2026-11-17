@@ -2,8 +2,7 @@
 name: feature
 description: Feature agent orchestrator. Manages the full feature lifecycle from PRD intake through design, task breakdown, and user story creation. Delivers ticket tracker user stories that @story picks up for implementation. Use slash commands to navigate phases.
 model:
-  - Claude Opus 5.5
-  - GPT-5.6 Sol
+  - ollama-models/qwen3-coder:30b
 tools:
   - search
   - web/fetch

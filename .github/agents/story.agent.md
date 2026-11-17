@@ -2,8 +2,7 @@
 name: story
 description: User story orchestrator. Drives a single user story autonomously from branch creation through requirements, implementation, testing, and PR creation — delegating each phase to a specialist subagent and gating it with a review. Use `/start <storyId> [--dev | --qe | --full]`. Without a flag the role is inferred from the story plan; --full (dev and QE in one run) runs only when typed.
 model:
-  - Claude Opus 5.5
-  - GPT-5.6 Sol
+  - ollama-models/qwen3-coder:30b
 tools:
   - search
   - search/usages

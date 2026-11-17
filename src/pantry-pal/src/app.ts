@@ -8,6 +8,7 @@ import type { AppDatabase } from './db/database.js';
 import { handleError, notFoundResponse } from './errors.js';
 import { originCheck } from './origin-check.js';
 import { HouseholdEventHub } from './realtime/household-event-hub.js';
+import { registerEventRoutes } from './routes/events.js';
 import { registerItemRoutes } from './routes/items.js';
 import { registerListRoutes } from './routes/lists.js';
 import { registerSyncRoutes } from './routes/sync.js';
@@ -69,6 +70,7 @@ export function createApp({
       db,
       items: new ItemService(db, eventHub, now),
     });
+    registerEventRoutes(app, { auth, db, hub: eventHub });
     registerSyncRoutes(app, {
       auth,
       db,
