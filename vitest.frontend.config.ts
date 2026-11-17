@@ -9,6 +9,8 @@ export default defineConfig({
       'src/pantry-pal.Frontend/**/*.spec.tsx',
     ],
     exclude: ['**/node_modules/**', '**/dist/**'],
+    environment: 'jsdom',
+    setupFiles: ['src/pantry-pal.Frontend/src/test/setup.ts'],
     passWithNoTests: true,
     // No reporters, outputFile or watch: test.mjs passes --reporter=json and --outputFile.
   },

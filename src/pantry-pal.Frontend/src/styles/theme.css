@@ -1,0 +1,29 @@
+/* Theme tokens. Dark is the default (also when the device has no or an unsupported preference);
+   light applies only when the device explicitly prefers it. Every text/background pair below is
+   checked against WCAG AA in theme.test.ts. */
+:root {
+  color-scheme: dark light;
+  --color-bg: #121212;
+  --color-surface: #1e1e1e;
+  --color-text: #ececec;
+  --color-text-muted: #b3b3b3;
+  --color-primary: #8ab4f8;
+  --color-on-primary: #0b1220;
+  --color-error: #ff9a9a;
+  --color-border: #8c8c8c;
+  --color-focus: #ffd166;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-bg: #ffffff;
+    --color-surface: #f4f4f4;
+    --color-text: #1a1a1a;
+    --color-text-muted: #595959;
+    --color-primary: #1a56c4;
+    --color-on-primary: #ffffff;
+    --color-error: #b00020;
+    --color-border: #767676;
+    --color-focus: #0b3d91;
+  }
+}

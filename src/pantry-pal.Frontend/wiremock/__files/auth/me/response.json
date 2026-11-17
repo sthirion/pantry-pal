@@ -1,0 +1,11 @@
+{
+  "user": {
+    "id": "user-1",
+    "name": "Sam",
+    "email": "sam@example.com"
+  },
+  "household": {
+    "id": "household-1",
+    "name": "The Smiths"
+  }
+}

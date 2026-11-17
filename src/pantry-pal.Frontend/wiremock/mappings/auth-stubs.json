@@ -1,0 +1,100 @@
+{
+  "mappings": [
+    {
+      "name": "Me - signed out (session scenario start)",
+      "scenarioName": "session",
+      "requiredScenarioState": "Started",
+      "request": { "urlPath": "/api/me", "method": "GET" },
+      "response": {
+        "status": 401,
+        "bodyFileName": "auth/errors/401.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 4
+    },
+    {
+      "name": "Me - signed in",
+      "scenarioName": "session",
+      "requiredScenarioState": "signed-in",
+      "request": { "urlPath": "/api/me", "method": "GET" },
+      "response": {
+        "status": 200,
+        "bodyFileName": "auth/me/response.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 4
+    },
+    {
+      "name": "Sign in - wrong password (use password 'wrong-password')",
+      "request": {
+        "urlPath": "/api/auth/sign-in/email",
+        "method": "POST",
+        "bodyPatterns": [
+          { "matchesJsonPath": "$[?(@.password == 'wrong-password')]" }
+        ]
+      },
+      "response": {
+        "status": 401,
+        "bodyFileName": "auth/errors/401.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 3
+    },
+    {
+      "name": "Sign in - rate limited (use email 'limited@example.com')",
+      "request": {
+        "urlPath": "/api/auth/sign-in/email",
+        "method": "POST",
+        "bodyPatterns": [
+          { "matchesJsonPath": "$[?(@.email == 'limited@example.com')]" }
+        ]
+      },
+      "response": {
+        "status": 429,
+        "bodyFileName": "auth/errors/429.json",
+        "headers": { "Content-Type": "application/json", "Retry-After": "60" }
+      },
+      "priority": 3
+    },
+    {
+      "name": "Sign in - server error (use email 'broken@example.com')",
+      "request": {
+        "urlPath": "/api/auth/sign-in/email",
+        "method": "POST",
+        "bodyPatterns": [
+          { "matchesJsonPath": "$[?(@.email == 'broken@example.com')]" }
+        ]
+      },
+      "response": {
+        "status": 500,
+        "bodyFileName": "auth/errors/500.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 3
+    },
+    {
+      "name": "Sign in - default success (fallback)",
+      "scenarioName": "session",
+      "newScenarioState": "signed-in",
+      "request": { "urlPath": "/api/auth/sign-in/email", "method": "POST" },
+      "response": {
+        "status": 200,
+        "bodyFileName": "auth/sign-in/response.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 5
+    },
+    {
+      "name": "Sign out - success, back to signed out",
+      "scenarioName": "session",
+      "newScenarioState": "Started",
+      "request": { "urlPath": "/api/auth/sign-out", "method": "POST" },
+      "response": {
+        "status": 200,
+        "jsonBody": { "success": true },
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 5
+    }
+  ]
+}

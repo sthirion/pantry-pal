@@ -1,0 +1,4 @@
+{
+  "redirect": false,
+  "user": { "id": "user-1", "name": "Sam", "email": "sam@example.com" }
+}
