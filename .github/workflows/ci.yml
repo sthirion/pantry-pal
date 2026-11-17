@@ -65,4 +65,4 @@ jobs:
           exit $code
 
       - name: Audit
-        run: npm audit --omit=dev --audit-level=high
+        run: npm run audit
