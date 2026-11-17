@@ -12,6 +12,7 @@
     "node": ">=22 <23"
   },
   "scripts": {
+    "audit": "node .github/scripts/audit.mjs",
     "build": "npm run build --workspaces && npm run typecheck --workspace=@pantry-pal/shared",
     "lint": "eslint . && prettier --check .",
     "test": "vitest run --config=vitest.unit.config.ts && vitest run --config=vitest.integration.config.ts && vitest run --config=vitest.frontend.config.ts",

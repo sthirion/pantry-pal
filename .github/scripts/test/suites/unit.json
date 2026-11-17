@@ -3,10 +3,12 @@
   "project": ".",
   "config": "vitest.unit.config.ts",
   "testFileGlobs": [
+    ".github/scripts/audit.test.mjs",
     "src/pantry-pal/**/*.test.ts",
     "src/pantry-pal.Shared/**/*.test.ts"
   ],
   "sourceGlobs": [
+    ".github/scripts/audit.mjs",
     "src/pantry-pal/src/**/*.ts",
     "src/pantry-pal.Shared/src/**/*.ts"
   ],

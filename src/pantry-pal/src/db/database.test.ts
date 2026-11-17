@@ -47,6 +47,7 @@ describe('database', () => {
         'list_item',
         'item_suggestion',
         'sync_state',
+        'maintenance_state',
         'change_counter',
       ]),
     );

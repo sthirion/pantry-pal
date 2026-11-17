@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: [
+      '.github/scripts/audit.test.mjs',
       'src/pantry-pal/**/*.test.ts',
       'src/pantry-pal.Shared/**/*.test.ts',
     ],

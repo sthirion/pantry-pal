@@ -14,6 +14,7 @@ import {
   runMigrations,
   type AppDatabase,
 } from './db/database.js';
+import { MaintenanceService } from './services/maintenance-service.js';
 
 const USAGE = `Usage: npm run admin -- <command> [options]
 
@@ -21,7 +22,7 @@ Commands:
   household:create --name <name>
   user:create --email <email> --name <name> --household <household-id>
   user:reset-password --email <email>
-
+  maintenance:daily
 Passwords are read from a hidden prompt; there is no password option.`;
 
 export interface CliIo {
@@ -70,6 +71,14 @@ export async function runCli(
         requireInteractive(io);
         await resetPassword(db, o, io.prompt);
         io.out('Password reset; all sessions revoked.');
+        return 0;
+      }
+      case 'maintenance:daily': {
+        parseOptions(rest, []);
+        const purged = new MaintenanceService(db).purgeTombstones();
+        io.out(
+          `Purged ${purged.lists} lists and ${purged.items} items deleted more than 30 days ago.`,
+        );
         return 0;
       }
       default:

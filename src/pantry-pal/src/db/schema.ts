@@ -178,6 +178,12 @@ export const syncState = sqliteTable('sync_state', {
   purgedThroughVersion: integer('purged_through_version').notNull(),
 });
 
+/** Single-row (id 1) record of the last daily tombstone purge, in epoch milliseconds. */
+export const maintenanceState = sqliteTable('maintenance_state', {
+  id: integer('id').primaryKey(),
+  lastRunAt: integer('last_run_at').notNull(),
+});
+
 export const changeCounter = sqliteTable('change_counter', {
   id: integer('id').primaryKey(),
   value: integer('value').notNull(),
