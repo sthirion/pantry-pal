@@ -1,0 +1,14 @@
+{
+  "mappings": [
+    {
+      "name": "Override: force 500 on sign-out (local data must remain)",
+      "request": { "urlPath": "/api/auth/sign-out", "method": "POST" },
+      "response": {
+        "status": 500,
+        "bodyFileName": "auth/errors/500.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 1
+    }
+  ]
+}

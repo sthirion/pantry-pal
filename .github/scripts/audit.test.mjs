@@ -36,7 +36,7 @@ function fixture() {
       ['node_modules/vitest/node_modules/picomatch', '4.0.7'],
     ],
     tinyglobby: [['node_modules/tinyglobby', '0.2.17']],
-    vite: [['node_modules/vite', '8.3.7']],
+    vite: [['node_modules/vite', '8.3.8']],
     vitest: [['node_modules/vitest', '5.1.0']],
   };
   const report = { auditReportVersion: 2, vulnerabilities: {} };

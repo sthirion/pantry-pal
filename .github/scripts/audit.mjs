@@ -8,7 +8,7 @@ const EXPIRES = new Date('2026-12-17T00:00:00Z');
 const TOOLING = new Map([
   ['node_modules/@vitest/coverage-v8', '5.1.0'],
   ['node_modules/vitest', '5.1.0'],
-  ['node_modules/vite', '8.3.7'],
+  ['node_modules/vite', '8.3.8'],
   ['node_modules/tinyglobby', '0.2.17'],
   ['node_modules/tinyglobby/node_modules/fdir', '6.5.0'],
   ['node_modules/tinyglobby/node_modules/picomatch', '4.0.7'],
