@@ -1,0 +1,14 @@
+{
+  "mappings": [
+    {
+      "name": "Override: force 500 on /api/me",
+      "request": { "urlPath": "/api/me", "method": "GET" },
+      "response": {
+        "status": 500,
+        "bodyFileName": "auth/errors/500.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 1
+    }
+  ]
+}
