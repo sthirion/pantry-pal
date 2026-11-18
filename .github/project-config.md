@@ -61,6 +61,7 @@
 - **Dependency audit**: `npm run audit` (repository-wide). It runs `npm audit --omit=dev --audit-level=high --json`, prints the full report, and blocks unexcepted high/critical findings and audit errors.
   - Temporary risk acceptance approved on 2026-11-17 for [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), expiring at **2026-12-17 00:00 UTC**. The latest published picomatch (4.0.7) has no patched release; six high findings are this advisory and its tooling meta-vulnerabilities, not six separate advisories.
   - Better Auth's optional peers cause Vitest/Vite tooling to appear in the production audit. The exception in [the audit gate](scripts/audit.mjs) requires the exact reviewed tooling paths/versions and lockfile `devOptional: true`; additional advisories, changed paths/versions, production dependency classification, and expiry remain blocking.
+  - On 2026-11-18, the reviewed version at `node_modules/vite` changed from `8.3.7` to `8.3.8` to match the lockfile. The tooling scope and expiry are unchanged.
   - This is **not a vulnerability fix**. Four moderate findings in Drizzle Kit's esbuild chain remain visible under the existing high-severity threshold. Replace the exception with patched dependencies when available, verify the raw audit, then remove the exception; do not renew it automatically.
 - **Format**: `npx prettier --write <changed files>` (Prettier). Make the `lint` script also run `prettier --check .`, so the review gate catches unformatted files.
 
