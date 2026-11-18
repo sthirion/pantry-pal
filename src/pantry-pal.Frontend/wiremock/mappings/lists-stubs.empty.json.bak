@@ -1,0 +1,14 @@
+{
+  "mappings": [
+    {
+      "name": "Sync - no lists (empty state)",
+      "request": { "urlPath": "/api/sync", "method": "GET" },
+      "response": {
+        "status": 200,
+        "bodyFileName": "lists/sync/empty.json",
+        "headers": { "Content-Type": "application/json" }
+      },
+      "priority": 1
+    }
+  ]
+}

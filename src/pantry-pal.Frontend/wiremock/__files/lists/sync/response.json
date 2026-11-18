@@ -1,0 +1,14 @@
+{
+  "version": 6,
+  "full": true,
+  "lists": [
+    { "id": "0192f0c2-0000-7000-8000-000000000001", "name": "pharmacy", "version": 1, "updatedAt": "2026-11-09T18:00:00.000Z", "deletedAt": null },
+    { "id": "0192f0c2-0000-7000-8000-000000000002", "name": "Garden Center", "version": 2, "updatedAt": "2026-11-09T18:01:00.000Z", "deletedAt": null },
+    { "id": "0192f0c2-0000-7000-8000-000000000003", "name": "Market", "version": 3, "updatedAt": "2026-11-09T18:02:00.000Z", "deletedAt": null }
+  ],
+  "items": [
+    { "id": "0192f0c3-0000-7000-8000-000000000001", "listId": "0192f0c2-0000-7000-8000-000000000003", "name": "milk", "crossedOffAt": null, "version": 4, "updatedAt": "2026-11-09T18:03:00.000Z", "deletedAt": null },
+    { "id": "0192f0c3-0000-7000-8000-000000000002", "listId": "0192f0c2-0000-7000-8000-000000000003", "name": "eggs", "crossedOffAt": null, "version": 5, "updatedAt": "2026-11-09T18:04:00.000Z", "deletedAt": null },
+    { "id": "0192f0c3-0000-7000-8000-000000000003", "listId": "0192f0c2-0000-7000-8000-000000000003", "name": "bread", "crossedOffAt": "2026-11-09T18:05:00.000Z", "version": 6, "updatedAt": "2026-11-09T18:05:00.000Z", "deletedAt": null }
+  ]
+}

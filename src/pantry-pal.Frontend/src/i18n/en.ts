@@ -16,8 +16,31 @@ export const en = {
   },
   lists: {
     title: 'Lists',
-    empty: 'No lists yet.',
+    empty: 'No lists yet. Create your first list above.',
     welcome: 'Signed in as {{name}} ({{household}}).',
+    loadError: 'Could not load your lists. Please reload the page.',
+    remaining_one: '{{count}} item left',
+    remaining_other: '{{count}} items left',
+    cancel: 'Cancel',
+    create: { label: 'New list name', submit: 'Create list' },
+    errors: {
+      empty: 'Enter a list name.',
+      tooLong: 'A list name can have at most {{max}} characters.',
+      duplicate: 'You already have a list with this name.',
+    },
+    rename: {
+      button: 'Rename {{name}}',
+      short: 'Rename',
+      label: 'New name for {{name}}',
+      save: 'Save',
+    },
+    delete: {
+      button: 'Delete {{name}}',
+      short: 'Delete',
+      group: 'Confirm deleting {{name}}',
+      confirm: 'Delete "{{name}}" and all its items?',
+      confirmButton: 'Delete list',
+    },
   },
   signOut: {
     button: 'Sign out',

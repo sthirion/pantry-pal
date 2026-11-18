@@ -19,3 +19,6 @@ sign-in makes `/api/me` return 200, and sign-out resets it. Reset with `POST /__
 | Unexpected status (500)   | Email `broken@example.com`                             |
 | Session check fails (500) | Rename `auth-stubs.me-error.json.bak` to `.json`       |
 | Sign-out fails (500)      | Rename `auth-stubs.sign-out-error.json.bak` to `.json` |
+| Lists with item counts    | Default: `GET /api/sync` returns pharmacy, Garden Center, Market (2 items left) |
+| No lists (empty state)    | Rename `lists-stubs.empty.json.bak` to `.json`         |
+| Create, rename, delete    | `PUT`/`DELETE /api/lists/{id}` return 204              |
