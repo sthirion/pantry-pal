@@ -123,6 +123,18 @@ body {
   font-size: 1.25rem;
 }
 
+.sync-status {
+  padding: 0 1rem;
+}
+
+.sync-status p {
+  margin: 0.5rem 0;
+}
+
+.sync-status__summary:empty {
+  display: none;
+}
+
 .app-main {
   padding: 1rem;
 }
