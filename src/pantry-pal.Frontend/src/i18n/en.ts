@@ -27,6 +27,16 @@ export const en = {
   session: {
     error: 'We could not check your sign-in status. Please try again.',
   },
+  sync: {
+    offline: 'You are offline. Changes are saved on this device.',
+    pending_one: '{{count}} change waiting to sync',
+    pending_other: '{{count}} changes waiting to sync',
+    authRequired: 'Your session has expired. Sign in to keep syncing.',
+    signInLink: 'Sign in',
+    dropped:
+      'The server rejected a change (error {{status}}). Your lists were refreshed from the server.',
+    dismiss: 'Dismiss',
+  },
   errorBoundary: {
     title: 'Something went wrong',
     message: 'An unexpected error occurred.',
