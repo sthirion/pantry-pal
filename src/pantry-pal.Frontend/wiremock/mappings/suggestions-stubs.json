@@ -1,0 +1,13 @@
+{
+  "mappings": [
+    {
+      "name": "Suggestions - household history",
+      "request": { "urlPath": "/api/suggestions", "method": "GET" },
+      "response": {
+        "status": 200,
+        "bodyFileName": "suggestions/response.json",
+        "headers": { "Content-Type": "application/json" }
+      }
+    }
+  ]
+}

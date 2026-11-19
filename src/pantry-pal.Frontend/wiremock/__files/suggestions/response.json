@@ -1,0 +1,89 @@
+{
+  "suggestions": [
+    {
+      "name": "milk",
+      "useCount": 20,
+      "lastUsedAt": "2026-11-18T09:00:00.000Z"
+    },
+    {
+      "name": "bananas",
+      "useCount": 15,
+      "lastUsedAt": "2026-11-17T09:00:00.000Z"
+    },
+    {
+      "name": "chicken breast",
+      "useCount": 14,
+      "lastUsedAt": "2026-11-16T09:00:00.000Z"
+    },
+    {
+      "name": "bread",
+      "useCount": 13,
+      "lastUsedAt": "2026-11-18T08:00:00.000Z"
+    },
+    {
+      "name": "cheddar cheese",
+      "useCount": 12,
+      "lastUsedAt": "2026-11-12T09:00:00.000Z"
+    },
+    {
+      "name": "chips",
+      "useCount": 12,
+      "lastUsedAt": "2026-11-15T09:00:00.000Z"
+    },
+    {
+      "name": "ice cream",
+      "useCount": 11,
+      "lastUsedAt": "2026-11-10T09:00:00.000Z"
+    },
+    {
+      "name": "rice",
+      "useCount": 10,
+      "lastUsedAt": "2026-11-09T09:00:00.000Z"
+    },
+    {
+      "name": "chocolate",
+      "useCount": 9,
+      "lastUsedAt": "2026-11-14T09:00:00.000Z"
+    },
+    {
+      "name": "butter",
+      "useCount": 9,
+      "lastUsedAt": "2026-11-13T09:00:00.000Z"
+    },
+    {
+      "name": "cherries",
+      "useCount": 8,
+      "lastUsedAt": "2026-11-11T09:00:00.000Z"
+    },
+    {
+      "name": "chickpeas",
+      "useCount": 7,
+      "lastUsedAt": "2026-11-08T09:00:00.000Z"
+    },
+    {
+      "name": "cheese slices",
+      "useCount": 6,
+      "lastUsedAt": "2026-11-07T09:00:00.000Z"
+    },
+    {
+      "name": "iced tea",
+      "useCount": 6,
+      "lastUsedAt": "2026-11-06T09:00:00.000Z"
+    },
+    {
+      "name": "chives",
+      "useCount": 5,
+      "lastUsedAt": "2026-11-05T09:00:00.000Z"
+    },
+    {
+      "name": "chai tea",
+      "useCount": 4,
+      "lastUsedAt": "2026-11-04T09:00:00.000Z"
+    },
+    {
+      "name": "chewing gum",
+      "useCount": 2,
+      "lastUsedAt": "2026-11-03T09:00:00.000Z"
+    }
+  ]
+}

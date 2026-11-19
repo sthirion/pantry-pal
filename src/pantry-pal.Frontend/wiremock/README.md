@@ -23,3 +23,4 @@ sign-in makes `/api/me` return 200, and sign-out resets it. Reset with `POST /__
 | No lists (empty state)    | Rename `lists-stubs.empty.json.bak` to `.json`                                             |
 | Create, rename, delete    | `PUT`/`DELETE /api/lists/{id}` return 204                                                  |
 | Item writes               | `PUT`/`DELETE /api/lists/{id}/items/{itemId}` and `POST .../items/delete-batch` return 204 |
+| Item suggestions          | `GET /api/suggestions` returns 17 names; type `ch` (10 match, top 8 shown) or `cre`        |
