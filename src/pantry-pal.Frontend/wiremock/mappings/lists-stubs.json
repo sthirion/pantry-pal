@@ -1,0 +1,23 @@
+{
+  "mappings": [
+    {
+      "name": "Sync - household with three lists",
+      "request": { "urlPath": "/api/sync", "method": "GET" },
+      "response": {
+        "status": 200,
+        "bodyFileName": "lists/sync/response.json",
+        "headers": { "Content-Type": "application/json" }
+      }
+    },
+    {
+      "name": "Put list - accepted",
+      "request": { "urlPathPattern": "/api/lists/[^/]+", "method": "PUT" },
+      "response": { "status": 204 }
+    },
+    {
+      "name": "Delete list - accepted",
+      "request": { "urlPathPattern": "/api/lists/[^/]+", "method": "DELETE" },
+      "response": { "status": 204 }
+    }
+  ]
+}
