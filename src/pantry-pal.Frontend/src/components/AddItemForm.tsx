@@ -8,6 +8,7 @@ import {
   ITEM_NAME_MAX,
   validateItemName,
 } from '../services/itemsView';
+import { ItemSuggestions } from './ItemSuggestions';
 
 interface Props {
   items: readonly ListItem[];
@@ -48,6 +49,11 @@ export function AddItemForm({ items, onAdd, onRestore, onHighlight }: Props) {
     inputRef.current?.focus();
   };
 
+  const handleSuggestionSelect = (suggestion: string) => {
+    setName(suggestion);
+    inputRef.current?.focus();
+  };
+
   return (
     <form className="list-form" onSubmit={onSubmit} noValidate>
       <div className="field">
@@ -63,6 +69,7 @@ export function AddItemForm({ items, onAdd, onRestore, onHighlight }: Props) {
           aria-describedby={error ? errorId : undefined}
           onChange={(e) => setName(e.target.value)}
         />
+        <ItemSuggestions value={name} onSelect={handleSuggestionSelect} />
         {error && (
           <p id={errorId} role="alert" className="error-text">
             {error}
