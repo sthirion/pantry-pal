@@ -43,6 +43,7 @@ export function ListRow({
       setError(t(`lists.errors.${problem}`, { max: LIST_NAME_MAX }));
       return;
     }
+    setError(null);
     await onRename(list.id, displayName(name));
     setMode('view');
   };
