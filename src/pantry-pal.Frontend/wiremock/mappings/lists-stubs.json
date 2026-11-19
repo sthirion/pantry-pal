@@ -18,6 +18,31 @@
       "name": "Delete list - accepted",
       "request": { "urlPathPattern": "/api/lists/[^/]+", "method": "DELETE" },
       "response": { "status": 204 }
+    },
+    {
+      "name": "Delete items batch - accepted",
+      "priority": 1,
+      "request": {
+        "urlPathPattern": "/api/lists/[^/]+/items/delete-batch",
+        "method": "POST"
+      },
+      "response": { "status": 204 }
+    },
+    {
+      "name": "Put item - accepted",
+      "request": {
+        "urlPathPattern": "/api/lists/[^/]+/items/[^/]+",
+        "method": "PUT"
+      },
+      "response": { "status": 204 }
+    },
+    {
+      "name": "Delete item - accepted",
+      "request": {
+        "urlPathPattern": "/api/lists/[^/]+/items/[^/]+",
+        "method": "DELETE"
+      },
+      "response": { "status": 204 }
     }
   ]
 }

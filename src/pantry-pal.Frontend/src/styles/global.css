@@ -220,3 +220,30 @@ body {
   color: var(--color-text);
   font: inherit;
 }
+
+.item-row__toggle {
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item-row--crossed .item-row__name {
+  text-decoration: line-through;
+}
+
+.item-row--crossed {
+  opacity: 0.7;
+}
+
+.item-row--highlight {
+  outline: 3px solid var(--color-border);
+}
