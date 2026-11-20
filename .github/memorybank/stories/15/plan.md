@@ -87,13 +87,13 @@ Full text: `requirements.md` in this folder. Keep only this summary here.
 [x] Requirements clear
 [x] Tracker story updated (or confirmed not needed)
 [x] Implementation complete (app code + unit tests)
-[ ] Code reviewed (app code)
-[ ] Draft PR created
+[x] Code reviewed (app code)
+[x] Draft PR created
 [ ] Integration tests written
 [ ] E2E tests written
-[ ] Code reviewed (test code)
-[ ] Test cases registered (or skipped)
-[ ] PR ready
+[x] Code reviewed (test code)
+[x] Test cases registered (or skipped)
+[x] PR ready
 
 ## Review Gate Status
 
