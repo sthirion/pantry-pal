@@ -167,6 +167,14 @@ body {
   margin: 0.5rem 0;
 }
 
+.app-main a,
+.sync-status a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+}
+
 .sync-status__summary:empty {
   display: none;
 }

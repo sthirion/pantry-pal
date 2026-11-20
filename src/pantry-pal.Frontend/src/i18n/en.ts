@@ -51,6 +51,7 @@ export const en = {
     crossedOffSection: 'Crossed Off',
     alreadyOnList: 'Already on the list',
     cancel: 'Cancel',
+    crossedOffState: 'Crossed off',
     crossOff: 'Cross off {{name}}',
     restore: 'Restore {{name}}',
     add: { label: 'Add an item', submit: 'Add item' },
@@ -94,7 +95,7 @@ export const en = {
     authRequired: 'Your session has expired. Sign in to keep syncing.',
     signInLink: 'Sign in',
     dropped:
-      'The server rejected a change (error {{status}}). Your lists were refreshed from the server.',
+      "One of your changes couldn't be saved because the server didn't accept it (error {{status}}). Your lists were refreshed from the server.",
     dismiss: 'Dismiss',
   },
   errorBoundary: {

@@ -32,6 +32,7 @@ export function ItemRow({
   const inputId = useId();
   const errorId = useId();
   const menuId = useId();
+  const stateId = useId();
   const crossedOff = item.crossedOffAt !== null;
 
   const startRename = () => {
@@ -107,12 +108,18 @@ export function ItemRow({
         type="button"
         className="item-row__toggle"
         aria-pressed={crossedOff}
+        aria-describedby={crossedOff ? stateId : undefined}
         aria-label={t(crossedOff ? 'items.restore' : 'items.crossOff', {
           name: item.name,
         })}
         onClick={() => void onToggle(item)}
       >
         <span className="item-row__name">{item.name}</span>
+        {crossedOff && (
+          <span id={stateId} className="visually-hidden">
+            {t('items.crossedOffState')}
+          </span>
+        )}
         {highlighted && (
           <span role="status" className="muted">
             {t('items.alreadyOnList')}
