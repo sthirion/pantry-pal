@@ -54,6 +54,11 @@ export const en = {
     crossOff: 'Cross off {{name}}',
     restore: 'Restore {{name}}',
     add: { label: 'Add an item', submit: 'Add item' },
+    suggestions: {
+      label: 'Suggestions',
+      count_one: '{{count}} suggestion available',
+      count_other: '{{count}} suggestions available',
+    },
     errors: {
       empty: 'Enter an item name.',
       tooLong: 'An item name can have at most {{max}} characters.',

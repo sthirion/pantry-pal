@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ItemsPage } from './ItemsPage';
 import { clearAllStores, db } from '../services/db';
 import { saveItem, saveList } from '../services/mutations';
@@ -15,6 +15,10 @@ const LIST = 'list-1';
 
 beforeEach(async () => {
   await clearAllStores();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const renderPage = (listId = LIST) =>
@@ -449,5 +453,39 @@ describe('ItemsPage', () => {
     expect(
       await screen.findByRole('button', { name: 'Cross off synced' }),
     ).toBeVisible();
+  });
+
+  it('adds a chosen suggestion to the list, queues it, and stops suggesting it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+    await seed();
+    const lastUsedAt = '2026-11-01T00:00:00.000Z';
+    await db.suggestions.bulkPut([
+      { name: 'ice cream', nameKey: 'ice cream', useCount: 3, lastUsedAt },
+      { name: 'iced tea', nameKey: 'iced tea', useCount: 1, lastUsedAt },
+    ]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole('heading', { name: 'Market' });
+    await user.type(addField(), 'ic');
+
+    await user.click(await screen.findByRole('option', { name: 'ice cream' }));
+
+    expect(
+      await screen.findByRole('button', { name: 'Cross off ice cream' }),
+    ).toBeVisible();
+    expect(await outbox()).toMatchObject([
+      {
+        kind: 'putItem',
+        listId: LIST,
+        body: { name: 'ice cream', crossedOff: false },
+      },
+    ]);
+    await user.type(addField(), 'ic');
+    expect(
+      await screen.findByRole('option', { name: 'iced tea' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('option', { name: 'ice cream' }),
+    ).not.toBeInTheDocument();
   });
 });

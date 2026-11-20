@@ -50,6 +50,42 @@ body {
   background: var(--color-surface);
 }
 
+.suggest-anchor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 20rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: 0 0 0.5rem 0.5rem;
+}
+
+.suggestions__option {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  cursor: pointer;
+}
+
+.suggestions__option[aria-selected='true'] {
+  font-weight: 600;
+  outline: 3px solid var(--color-focus);
+  outline-offset: -3px;
+}
+
 .card h1 {
   margin-top: 0;
   font-size: 1.5rem;
