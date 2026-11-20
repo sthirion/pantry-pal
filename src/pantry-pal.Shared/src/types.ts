@@ -1,10 +1,14 @@
 import type { z } from 'zod';
 import type {
+  changePasswordBodySchema,
   deleteItemsBodySchema,
   putItemBodySchema,
   putListBodySchema,
+  updateProfileBodySchema,
 } from './schemas.js';
 
+export type UpdateProfileBody = z.infer<typeof updateProfileBodySchema>;
+export type ChangePasswordBody = z.infer<typeof changePasswordBodySchema>;
 export type PutListBody = z.infer<typeof putListBodySchema>;
 export type PutItemBody = z.infer<typeof putItemBodySchema>;
 export type DeleteItemsBody = z.infer<typeof deleteItemsBodySchema>;
@@ -12,6 +16,10 @@ export type DeleteItemsBody = z.infer<typeof deleteItemsBodySchema>;
 export interface MeResponse {
   user: { id: string; name: string; email: string };
   household: { id: string; name: string };
+}
+
+export interface UpdateProfileResponse {
+  user: MeResponse['user'];
 }
 
 export interface ShoppingList {

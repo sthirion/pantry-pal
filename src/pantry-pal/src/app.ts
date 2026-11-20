@@ -11,6 +11,7 @@ import { HouseholdEventHub } from './realtime/household-event-hub.js';
 import { registerEventRoutes } from './routes/events.js';
 import { registerItemRoutes } from './routes/items.js';
 import { registerListRoutes } from './routes/lists.js';
+import { registerProfileRoutes } from './routes/profile.js';
 import { registerSyncRoutes } from './routes/sync.js';
 import { ItemService } from './services/item-service.js';
 import { ListService } from './services/list-service.js';
@@ -60,6 +61,7 @@ export function createApp({
   const auth = db && createAuth(config, db);
   if (auth && db) {
     registerAuthRoutes(app, auth, db);
+    registerProfileRoutes(app, { auth, now });
     registerListRoutes(app, {
       auth,
       db,

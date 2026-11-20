@@ -1,11 +1,11 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '@pantry-pal/shared';
 import type { Config } from './config.js';
 import type { AppDatabase } from './db/database.js';
 import * as schema from './db/schema.js';
 
-export const PASSWORD_MIN_LENGTH = 8;
-export const PASSWORD_MAX_LENGTH = 128;
+export { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH };
 
 const SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
 const SESSION_REFRESH_SECONDS = 60 * 60 * 24;

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  changePasswordBodySchema,
   changedAtSchema,
   deleteItemsBodySchema,
   putItemBodySchema,
   putListBodySchema,
   sinceQuerySchema,
+  updateProfileBodySchema,
   uuidSchema,
 } from './schemas.js';
 
@@ -179,5 +181,97 @@ describe('uuidSchema', () => {
 
   it.each(['abc', ''])('rejects %j', (value) => {
     expect(uuidSchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('updateProfileBodySchema', () => {
+  it('accepts 1 and 100 characters and outputs the displayName form', () => {
+    expect(updateProfileBodySchema.parse({ name: ' Sam   Lee ' }).name).toBe(
+      'Sam Lee',
+    );
+    expect(updateProfileBodySchema.safeParse({ name: 'a' }).success).toBe(true);
+    expect(
+      updateProfileBodySchema.safeParse({ name: 'a'.repeat(100) }).success,
+    ).toBe(true);
+  });
+
+  it.each(['', '   ', 'a'.repeat(101), undefined, 5])(
+    'rejects name %j',
+    (name) => {
+      expect(failingPath(updateProfileBodySchema.safeParse({ name }))).toEqual([
+        'name',
+      ]);
+    },
+  );
+
+  it('strips unknown properties such as email', () => {
+    expect(
+      updateProfileBodySchema.parse({ name: 'x', email: 'a@b.co' }),
+    ).toEqual({ name: 'x' });
+  });
+});
+
+describe('changePasswordBodySchema', () => {
+  const valid = {
+    currentPassword: 'old password',
+    newPassword: 'new password',
+  };
+
+  it('accepts a new password of 8 and 128 characters', () => {
+    expect(
+      changePasswordBodySchema.safeParse({
+        ...valid,
+        newPassword: 'a'.repeat(8),
+      }).success,
+    ).toBe(true);
+    expect(
+      changePasswordBodySchema.safeParse({
+        ...valid,
+        newPassword: 'a'.repeat(128),
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each(['a'.repeat(7), 'a'.repeat(129), '', undefined, 5])(
+    'rejects newPassword %j',
+    (newPassword) => {
+      const result = changePasswordBodySchema.safeParse({
+        ...valid,
+        newPassword,
+      });
+      expect(failingPath(result)).toEqual(['newPassword']);
+    },
+  );
+
+  it.each(['', 'a'.repeat(129), undefined])(
+    'rejects currentPassword %j',
+    (currentPassword) => {
+      const result = changePasswordBodySchema.safeParse({
+        ...valid,
+        currentPassword,
+      });
+      expect(failingPath(result)).toEqual(['currentPassword']);
+    },
+  );
+
+  it('reports the length message for a short new password', () => {
+    const result = changePasswordBodySchema.safeParse({
+      ...valid,
+      newPassword: 'short',
+    });
+    expect(result.error?.issues[0]?.message).toBe(
+      'Must be 8 to 128 characters.',
+    );
+  });
+
+  it('rejects a new password equal to the current one', () => {
+    const result = changePasswordBodySchema.safeParse({
+      currentPassword: 'same password',
+      newPassword: 'same password',
+    });
+    expect(failingPath(result)).toEqual(['newPassword']);
+    expect(result.error?.issues[0]?.message).toBe(
+      'Must differ from the current password.',
+    );
   });
 });

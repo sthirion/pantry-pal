@@ -27,6 +27,28 @@ export const putItemBodySchema = z.object({
   changedAt: changedAtSchema,
 });
 
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 128;
+
+export const updateProfileBodySchema = z.object({
+  name: boundedName(100),
+});
+
+const passwordLengthMessage = `Must be ${PASSWORD_MIN_LENGTH} to ${PASSWORD_MAX_LENGTH} characters.`;
+
+export const changePasswordBodySchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Required.').max(PASSWORD_MAX_LENGTH),
+    newPassword: z
+      .string()
+      .min(PASSWORD_MIN_LENGTH, passwordLengthMessage)
+      .max(PASSWORD_MAX_LENGTH, passwordLengthMessage),
+  })
+  .refine((body) => body.newPassword !== body.currentPassword, {
+    path: ['newPassword'],
+    message: 'Must differ from the current password.',
+  });
+
 export const deleteItemsBodySchema = z.object({
   itemIds: z.array(uuidSchema).min(1).max(500),
   changedAt: changedAtSchema,
