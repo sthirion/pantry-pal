@@ -1,4 +1,4 @@
-import 'fake-indexeddb/auto';
+﻿import 'fake-indexeddb/auto';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
@@ -456,7 +456,6 @@ describe('ItemsPage', () => {
     ).toBeVisible();
   });
 
-<<<<<<< Updated upstream
   it('adds a chosen suggestion to the list, queues it, and stops suggesting it', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
     await seed();
@@ -489,7 +488,8 @@ describe('ItemsPage', () => {
     expect(
       screen.queryByRole('option', { name: 'ice cream' }),
     ).not.toBeInTheDocument();
-=======
+  });
+
   it('announces the crossed-off state of an item', async () => {
     await seed({ name: 'milk' }, { name: 'bread', crossedOff: true });
     renderPage();
@@ -532,6 +532,5 @@ describe('ItemsPage', () => {
     });
 
     expect(results.violations).toEqual([]);
->>>>>>> Stashed changes
   });
 });

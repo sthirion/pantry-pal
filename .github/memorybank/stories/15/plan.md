@@ -89,8 +89,8 @@ Full text: `requirements.md` in this folder. Keep only this summary here.
 [x] Implementation complete (app code + unit tests)
 [x] Code reviewed (app code)
 [x] Draft PR created
-[ ] Integration tests written
-[ ] E2E tests written
+[x] Integration tests written
+[x] E2E tests written
 [x] Code reviewed (test code)
 [x] Test cases registered (or skipped)
 [x] PR ready
