@@ -7,6 +7,7 @@ import { ClearCrossedOff } from '../components/ClearCrossedOff';
 import { ItemRow } from '../components/ItemRow';
 import { useItemActions } from '../hooks/useItemActions';
 import { useListItems } from '../hooks/useListItems';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { splitItems } from '../services/itemsView';
 
 /** One list: the add field, active items, the crossed-off section, and clear crossed off. */
@@ -15,6 +16,7 @@ export function ItemsPage() {
   const { listId = '' } = useParams();
   const { loaded, error, list, items } = useListItems(listId);
   const actions = useItemActions(listId);
+  useWakeLock();
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const { active, crossedOff } = useMemo(() => splitItems(items), [items]);
 

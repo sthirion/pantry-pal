@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import axe from 'axe-core';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ItemsPage } from './ItemsPage';
@@ -455,6 +456,7 @@ describe('ItemsPage', () => {
     ).toBeVisible();
   });
 
+<<<<<<< Updated upstream
   it('adds a chosen suggestion to the list, queues it, and stops suggesting it', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
     await seed();
@@ -487,5 +489,49 @@ describe('ItemsPage', () => {
     expect(
       screen.queryByRole('option', { name: 'ice cream' }),
     ).not.toBeInTheDocument();
+=======
+  it('announces the crossed-off state of an item', async () => {
+    await seed({ name: 'milk' }, { name: 'bread', crossedOff: true });
+    renderPage();
+
+    const crossed = await screen.findByRole('button', {
+      name: 'Restore bread',
+    });
+    expect(crossed).toHaveAttribute('aria-pressed', 'true');
+    expect(crossed).toHaveAccessibleDescription('Crossed off');
+    expect(
+      screen.getByRole('button', { name: 'Cross off milk' }),
+    ).toHaveAccessibleDescription('');
+  });
+
+  it('keeps the screen awake while a list is open', async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    const request = vi.fn().mockResolvedValue({ release });
+    Object.defineProperty(navigator, 'wakeLock', {
+      value: { request },
+      configurable: true,
+    });
+    await seed();
+
+    const { unmount } = renderPage();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('screen'));
+    await Promise.resolve();
+    unmount();
+
+    expect(release).toHaveBeenCalled();
+    Reflect.deleteProperty(navigator, 'wakeLock');
+  });
+
+  it('has no axe violations', async () => {
+    await seed({ name: 'milk' }, { name: 'bread', crossedOff: true });
+    const { container } = renderPage();
+    await screen.findByRole('button', { name: 'Restore bread' });
+
+    const results = await axe.run(container, {
+      rules: { 'color-contrast': { enabled: false } },
+    });
+
+    expect(results.violations).toEqual([]);
+>>>>>>> Stashed changes
   });
 });
