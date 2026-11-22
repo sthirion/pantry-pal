@@ -66,3 +66,35 @@ jobs:
 
       - name: Audit
         run: npm run audit
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Test (E2E)
+        run: node .github/scripts/test/test.mjs e2e --scope all
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: src/pantry-pal.E2ETests/test-results/
+          if-no-files-found: ignore
