@@ -57,7 +57,7 @@ export const test = base.extend<Fixtures>({
   // service worker controls through `page.route`, so the mocked API would be bypassed (the app
   // then reaches the real server and shows "session expired"). Specs that mock `/api` therefore
   // run without the service worker; the journey specs keep it and use the real API.
-  serviceWorkers: ['block', { option: true }],
+  serviceWorkers: 'block',
   api: async ({ page }, use) => {
     const api: MockApi = {
       writeStatus: 204,
