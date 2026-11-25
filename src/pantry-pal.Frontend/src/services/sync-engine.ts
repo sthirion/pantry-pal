@@ -169,14 +169,11 @@ export class SyncEngine {
   }
 
   private async onChanged(data: string): Promise<void> {
-    let version: unknown;
-    try {
-      version = (JSON.parse(data) as { version?: unknown }).version;
-    } catch {
-      return;
-    }
+    // The server sends the bare write version as the event data (e.g. `42`).
+    if (!/^\d+$/.test(data)) return;
+    const version = Number(data);
     const cursor = (await getMeta<number>('cursor')) ?? 0;
-    if (typeof version === 'number' && version > cursor) await this.pull();
+    if (version > cursor) await this.pull();
   }
 
   /**

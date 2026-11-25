@@ -1,7 +1,8 @@
 {
   "households": {
     "a": "The Smiths",
-    "b": "The Joneses"
+    "b": "The Joneses",
+    "c": "The Parkers"
   },
   "personas": {
     "sam": {
@@ -21,6 +22,12 @@
       "email": "jo@example.com",
       "password": "meadow-quartz-ribbon",
       "household": "b"
+    },
+    "pat": {
+      "name": "Pat",
+      "email": "pat@example.com",
+      "password": "lantern-orbit-pebble",
+      "household": "c"
     }
   },
   "suggestions": ["oat milk", "oranges", "olive oil"]

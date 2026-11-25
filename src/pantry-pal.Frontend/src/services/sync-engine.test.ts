@@ -497,21 +497,41 @@ describe('triggers', () => {
     );
     await settle();
     request.mockClear();
-    listeners.changed!({ data: '{"version":5}' } as MessageEvent<string>);
+    listeners.changed!({ data: '5' } as MessageEvent<string>);
     await settle();
     expect(request).not.toHaveBeenCalled();
-    listeners.changed!({ data: '{"version":6}' } as MessageEvent<string>);
+    listeners.changed!({ data: '6' } as MessageEvent<string>);
     await settle();
     expect(request).toHaveBeenCalledWith('/api/sync?since=5');
     engine.stop();
   });
 
+  it('pulls on a bare numeric SSE payload as the server sends it', async () => {
+    await setMeta('cursor', 5);
+    const { engine, listeners, request } = start(() =>
+      snapshot({ version: 5 }),
+    );
+    await settle();
+    request.mockClear();
+    listeners.changed!({ data: '42' } as MessageEvent<string>);
+    await settle();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith('/api/sync?since=5');
+    engine.stop();
+  });
+
   it('ignores malformed SSE payloads', async () => {
-    const { engine, listeners, request } = start();
+    await setMeta('cursor', 5);
+    const { engine, listeners, request } = start(() =>
+      snapshot({ version: 5 }),
+    );
     await settle();
     request.mockClear();
     listeners.changed!({ data: 'nope' } as MessageEvent<string>);
-    listeners.changed!({ data: '{"version":"x"}' } as MessageEvent<string>);
+    listeners.changed!({ data: '' } as MessageEvent<string>);
+    listeners.changed!({ data: '{"version":6}' } as MessageEvent<string>);
+    // Number(' 6 ') coerces to 6 (> cursor 5), so only the digits-only guard blocks it.
+    listeners.changed!({ data: ' 6 ' } as MessageEvent<string>);
     await settle();
     expect(request).not.toHaveBeenCalled();
     engine.stop();
