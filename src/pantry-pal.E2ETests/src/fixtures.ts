@@ -53,6 +53,11 @@ interface Fixtures {
 }
 
 export const test = base.extend<Fixtures>({
+  // The built app registers a service worker. WebKit does not route requests of a page that a
+  // service worker controls through `page.route`, so the mocked API would be bypassed (the app
+  // then reaches the real server and shows "session expired"). Specs that mock `/api` therefore
+  // run without the service worker; the journey specs keep it and use the real API.
+  serviceWorkers: ['block', { option: true }],
   api: async ({ page }, use) => {
     const api: MockApi = {
       writeStatus: 204,
