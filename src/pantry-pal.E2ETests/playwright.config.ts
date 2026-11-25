@@ -1,9 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const port = 5199;
+const origin = `http://127.0.0.1:${port}`;
 
-// The frontend dev server serves the app; every `/api` call is mocked in the specs
-// (see src/fixtures.ts), so no backend or WireMock container is needed.
+// `server/start.mjs` starts the real API on a temporary SQLite database with seeded personas and
+// serves the built frontend (run `npm run build` first). Specs that use src/fixtures.ts still mock
+// `/api` in the browser; the journey specs (src/journeys.ts) talk to the real API.
 export default defineConfig({
   testDir: './src',
   testMatch: '**/*.spec.ts',
@@ -11,15 +13,19 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    baseURL: `http://localhost:${port}`,
+    baseURL: origin,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Pixel 7'] } },
+    { name: 'webkit', use: { ...devices['iPhone 14'] } },
+  ],
   webServer: {
-    command: `npm run dev --workspace=@pantry-pal/frontend -- --port ${port} --strictPort`,
-    cwd: '../..',
-    url: `http://localhost:${port}/sign-in`,
-    reuseExistingServer: !process.env.CI,
+    command: 'node server/start.mjs',
+    cwd: '.',
+    env: { E2E_ORIGIN: origin },
+    url: `${origin}/sign-in`,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

@@ -1,0 +1,27 @@
+{
+  "households": {
+    "a": "The Smiths",
+    "b": "The Joneses"
+  },
+  "personas": {
+    "sam": {
+      "name": "Sam",
+      "email": "sam@example.com",
+      "password": "correct-horse-battery",
+      "household": "a"
+    },
+    "alex": {
+      "name": "Alex",
+      "email": "alex@example.com",
+      "password": "staple-purple-lantern",
+      "household": "a"
+    },
+    "jo": {
+      "name": "Jo",
+      "email": "jo@example.com",
+      "password": "meadow-quartz-ribbon",
+      "household": "b"
+    }
+  },
+  "suggestions": ["oat milk", "oranges", "olive oil"]
+}
