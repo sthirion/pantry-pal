@@ -135,6 +135,8 @@ test.describe('Item management @TEST', () => {
 
     // When
     await input.fill('oliv');
+    // The suggestion pool loads asynchronously; keys sent before the listbox opens are ignored.
+    await expect(page.getByRole('option', { name: 'olive oil' })).toBeVisible();
     await input.press('ArrowDown');
     await input.press('Enter');
 

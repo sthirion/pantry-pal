@@ -2,11 +2,16 @@ import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 import {
   addItem,
+  clickRowControl,
+  createList,
   expect,
+  jo,
+  openSignedInPage,
   sam,
   signIn,
   startWithList,
   test,
+  uniqueName,
 } from './journeys.js';
 
 async function expectNoAxeViolations(page: Page): Promise<void> {
@@ -97,5 +102,90 @@ test.describe('Accessibility of the real screens @TEST', () => {
 
     // Then
     await expectNoAxeViolations(page);
+  });
+
+  test('empty lists screen has no axe violations', async ({
+    browser,
+  }, testInfo) => {
+    // Given / When
+    const joPage = await openSignedInPage(browser, jo, testInfo.project.use);
+    await expect(
+      joPage.getByText('No lists yet. Create your first list above.'),
+    ).toBeVisible();
+
+    // Then
+    await expectNoAxeViolations(joPage);
+    await joPage.context().close();
+  });
+
+  test('empty items screen has no axe violations', async ({ page }) => {
+    // Given / When
+    await startWithList(page, sam, 'Axe');
+    await expect(page.getByText('No items yet.')).toBeVisible();
+
+    // Then
+    await expectNoAxeViolations(page);
+  });
+
+  test('delete-list prompt has no axe violations', async ({ page }) => {
+    // Given
+    const name = uniqueName('Axe');
+    await signIn(page, sam);
+    await createList(page, name);
+
+    // When
+    await clickRowControl(page.getByRole('button', { name: `Delete ${name}` }));
+    await expect(
+      page.getByRole('group', { name: `Confirm deleting ${name}` }),
+    ).toBeVisible();
+
+    // Then
+    await expectNoAxeViolations(page);
+  });
+
+  test('list rename edit state has no axe violations', async ({ page }) => {
+    // Given
+    const name = uniqueName('Axe');
+    await signIn(page, sam);
+    await createList(page, name);
+
+    // When
+    await clickRowControl(page.getByRole('button', { name: `Rename ${name}` }));
+    await expect(page.getByLabel(`New name for ${name}`)).toBeFocused();
+
+    // Then
+    await expectNoAxeViolations(page);
+  });
+
+  test('item rename edit state has no axe violations', async ({ page }) => {
+    // Given
+    await startWithList(page, sam, 'Axe');
+    await addItem(page, 'milk');
+
+    // When
+    await page.getByRole('button', { name: 'Actions for milk' }).click();
+    await page.getByRole('button', { name: 'Rename' }).click();
+    await expect(page.getByLabel('New name for milk')).toBeFocused();
+
+    // Then
+    await expectNoAxeViolations(page);
+  });
+
+  test('"list no longer exists" screen has no axe violations', async ({
+    page,
+    browser,
+  }, testInfo) => {
+    // Given
+    await startWithList(page, sam, 'Axe');
+    const listPath = new URL(page.url()).pathname;
+    const joPage = await openSignedInPage(browser, jo, testInfo.project.use);
+
+    // When
+    await joPage.goto(listPath);
+    await expect(joPage.getByText('This list no longer exists.')).toBeVisible();
+
+    // Then
+    await expectNoAxeViolations(joPage);
+    await joPage.context().close();
   });
 });

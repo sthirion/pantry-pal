@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { randomInt } from 'node:crypto';
 import { test as base, expect } from '@playwright/test';
-import type { Browser, Page } from '@playwright/test';
+import type { Browser, Locator, Page } from '@playwright/test';
 
 interface Persona {
   name: string;
@@ -75,8 +75,18 @@ export async function createList(page: Page, name: string): Promise<void> {
   await expect(page.getByRole('link', { name })).toBeVisible();
 }
 
+/**
+ * Clicks a control on the lists screen. Parallel tests add lists to the same household, so the rows
+ * shift while a pointer click is in flight and the click can be dropped or hit a neighbouring row.
+ * Dispatching the click on the located element always reaches this row's control.
+ */
+export async function clickRowControl(locator: Locator): Promise<void> {
+  await expect(locator).toBeVisible();
+  await locator.dispatchEvent('click');
+}
+
 export async function openList(page: Page, name: string): Promise<void> {
-  await page.getByRole('link', { name }).click();
+  await clickRowControl(page.getByRole('link', { name }));
   await expect(page.getByRole('heading', { name })).toBeVisible();
 }
 

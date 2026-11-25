@@ -6,8 +6,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const apiDist = path.resolve(here, '../../pantry-pal/dist');
-const frontendDist = path.resolve(here, '../../pantry-pal.Frontend/dist');
+// E2E_API_DIST / E2E_FRONTEND_DIST override the build locations (used by the setup-failure spec).
+const apiDist = path.resolve(
+  process.env.E2E_API_DIST ?? path.join(here, '../../pantry-pal/dist'),
+);
+const frontendDist = path.resolve(
+  process.env.E2E_FRONTEND_DIST ??
+    path.join(here, '../../pantry-pal.Frontend/dist'),
+);
 const origin = process.env.E2E_ORIGIN ?? 'http://127.0.0.1:5199';
 
 function fail(message) {

@@ -1,4 +1,5 @@
 import {
+  clickRowControl,
   createList,
   expect,
   sam,
@@ -21,7 +22,7 @@ test.describe('List management @TEST', () => {
     await expect(page.getByRole('link', { name })).toBeVisible();
 
     // When
-    await page.getByRole('button', { name: `Rename ${name}` }).click();
+    await clickRowControl(page.getByRole('button', { name: `Rename ${name}` }));
     await page.getByLabel(`New name for ${name}`).fill(renamed);
     await page.getByRole('button', { name: 'Save' }).click();
 
@@ -30,11 +31,14 @@ test.describe('List management @TEST', () => {
     await expect(page.getByRole('link', { name })).toHaveCount(0);
 
     // When
-    await page.getByRole('button', { name: `Delete ${renamed}` }).click();
-    await page
-      .getByRole('group', { name: `Confirm deleting ${renamed}` })
-      .getByRole('button', { name: 'Delete list' })
-      .click();
+    await clickRowControl(
+      page.getByRole('button', { name: `Delete ${renamed}` }),
+    );
+    await clickRowControl(
+      page
+        .getByRole('group', { name: `Confirm deleting ${renamed}` })
+        .getByRole('button', { name: 'Delete list' }),
+    );
 
     // Then
     await expect(page.getByRole('link', { name: renamed })).toHaveCount(0);
@@ -63,8 +67,8 @@ test.describe('List management @TEST', () => {
     await createList(page, name);
 
     // When
-    await page.getByRole('button', { name: `Delete ${name}` }).click();
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    await clickRowControl(page.getByRole('button', { name: `Delete ${name}` }));
+    await clickRowControl(page.getByRole('button', { name: 'Cancel' }));
 
     // Then
     await expect(page.getByRole('link', { name })).toBeVisible();
