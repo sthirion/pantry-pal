@@ -12,9 +12,12 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     await context.setOffline(true);
 
     // When
-    await page.getByLabel('Add an item').fill('apples');
+    const addItemInput = page.getByLabel('Add an item');
+    await addItemInput.fill('apples');
     await page.getByRole('button', { name: 'Add item' }).click();
-    await page.getByLabel('Add an item').fill('pears');
+    // The form clears the draft once the add settles; typing earlier is overwritten.
+    await expect(addItemInput).toHaveValue('');
+    await addItemInput.fill('pears');
     await page.getByRole('button', { name: 'Add item' }).click();
 
     // Then
@@ -24,6 +27,9 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     await expect(page.getByText('2 changes waiting to sync')).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Cross off apples' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Cross off pears' }),
     ).toBeVisible();
   });
 
@@ -78,9 +84,12 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     // Then
     await expect(page.getByText(/waiting to sync/)).toHaveCount(0);
     await expect(page.getByText(/You are offline/)).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Restore milk' }),
+    ).toBeVisible();
   });
 
-  test('shopper sees a plain-language message when the server rejects a change', async ({
+  test('a rejected item edit is blocked and shown for review with its attempted values', async ({
     page,
     api,
   }) => {
@@ -92,14 +101,53 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     await page.getByRole('button', { name: 'Cross off milk' }).click();
 
     // Then
-    const alert = page
-      .getByRole('alert')
-      .filter({ hasText: "couldn't be saved" });
-    await expect(alert).toContainText('error 422');
+    const review = page.getByRole('region', { name: 'Changes to review' });
+    await expect(review).toBeVisible();
+    await expect(
+      review.getByText(
+        'Your change to "milk" was not accepted (error 422). Nothing was applied.',
+      ),
+    ).toBeVisible();
+    await expect(review.getByText('Crossed off')).toBeVisible();
+    await expect(review.getByText('Your value: Yes')).toBeVisible();
+    await expect(
+      page.getByText(
+        '1 change needs your review. Open its list to resolve it.',
+      ),
+    ).toBeVisible();
     await expect(page.getByText(/waiting to sync/)).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Cross off milk' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Restore milk' }),
+    ).toHaveCount(0);
+
+    // When
+    await page.reload();
+
+    // Then
+    const reviewAfterReload = page.getByRole('region', {
+      name: 'Changes to review',
+    });
+    await expect(reviewAfterReload).toBeVisible();
+    await expect(
+      reviewAfterReload.getByText(
+        'Your change to "milk" was not accepted (error 422). Nothing was applied.',
+      ),
+    ).toBeVisible();
+    await expect(reviewAfterReload.getByText('Crossed off')).toBeVisible();
+    await expect(reviewAfterReload.getByText('Your value: Yes')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Cross off milk' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Restore milk' }),
+    ).toHaveCount(0);
   });
 
-  test('shopper can dismiss the rejected-change message', async ({
+  test('shopper can discard a blocked item edit from the keyboard', async ({
     page,
     api,
   }) => {
@@ -107,15 +155,24 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     await openMarketList(page);
     api.writeStatus = 422;
     await page.getByRole('button', { name: 'Cross off milk' }).click();
-    const alert = page
-      .getByRole('alert')
-      .filter({ hasText: "couldn't be saved" });
-    await expect(alert).toBeVisible();
+    const review = page.getByRole('region', { name: 'Changes to review' });
+    const discard = review.getByRole('button', {
+      name: 'Discard my change to milk',
+      exact: true,
+    });
+    await expect(discard).toBeVisible();
 
     // When
-    await alert.getByRole('button', { name: 'Dismiss' }).click();
+    await discard.focus();
+    await expect(discard).toBeFocused();
+    await page.keyboard.press('Enter');
 
     // Then
-    await expect(alert).toHaveCount(0);
+    await expect(review).toHaveCount(0);
+    await expect(page.getByText(/needs? your review/)).toHaveCount(0);
+    await expect(page.getByText(/waiting to sync/)).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Cross off milk' }),
+    ).toBeVisible();
   });
 });

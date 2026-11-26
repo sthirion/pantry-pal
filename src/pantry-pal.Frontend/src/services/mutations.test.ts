@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearAllStores, db } from './db';
+import type { ListItem } from '@pantry-pal/shared';
+import { clearAllStores, db, PantryDb } from './db';
 import {
   clearCrossedOff,
   removeItem,
@@ -103,5 +104,95 @@ describe('mutations', () => {
     const before = (await queue()).length;
     await clearCrossedOff('l');
     expect((await queue()).length).toBe(before);
+  });
+});
+
+describe('item edits of a server-known item', () => {
+  const known = (over: Partial<ListItem> = {}): ListItem => ({
+    id: 'i1',
+    listId: 'l',
+    name: 'milk',
+    crossedOffAt: null,
+    version: 7,
+    itemRevision: 14,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    deletedAt: null,
+    ...over,
+  });
+
+  it('queues only the changed field with the item id, base revision, and a UUID mutation id', async () => {
+    await db.items.put(known());
+    await saveItem('l', { name: 'milk', crossedOff: true }, 'i1');
+    const [mutation] = await queue();
+    expect(mutation).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      kind: 'updateItem',
+      listId: 'l',
+      itemId: 'i1',
+      baseItemRevision: 14,
+      changes: { crossedOff: true },
+    });
+  });
+
+  it('queues only a changed name when renaming', async () => {
+    await db.items.put(known({ crossedOffAt: '2026-01-01T00:00:00.000Z' }));
+    await saveItem('l', { name: 'oat milk', crossedOff: true }, 'i1');
+    expect(await queue()).toMatchObject([{ changes: { name: 'oat milk' } }]);
+  });
+
+  it('updates the local row at once and keeps its server revision', async () => {
+    await db.items.put(known());
+    await saveItem('l', { name: 'oat milk', crossedOff: true }, 'i1');
+    expect(await db.items.get('i1')).toMatchObject({
+      name: 'oat milk',
+      crossedOffAt: expect.any(String),
+      version: 7,
+      itemRevision: 14,
+    });
+  });
+
+  it('queues nothing when no field changed', async () => {
+    await db.items.put(known());
+    await saveItem('l', { name: 'milk', crossedOff: false }, 'i1');
+    expect(await queue()).toEqual([]);
+  });
+
+  it('keeps successive edits as distinct mutations in creation order', async () => {
+    await db.items.put(known());
+    await saveItem('l', { name: 'milk', crossedOff: true }, 'i1');
+    await saveItem('l', { name: 'oat milk', crossedOff: true }, 'i1');
+    const [first, second] = await queue();
+    expect(first!.id).not.toBe(second!.id);
+    expect([first, second]).toMatchObject([
+      { changes: { crossedOff: true } },
+      { changes: { name: 'oat milk' } },
+    ]);
+  });
+
+  it('keeps the queued patch and its id after a reload', async () => {
+    await db.items.put(known());
+    await saveItem('l', { name: 'milk', crossedOff: true }, 'i1');
+    const before = await queue();
+    const reopened = new PantryDb();
+    const after = (await reopened.outbox.toArray()).map((e) => e.mutation);
+    reopened.close();
+    expect(after).toEqual(before);
+  });
+
+  it('sends a full create while the item itself is still queued as new', async () => {
+    const id = await saveItem('l', { name: 'milk', crossedOff: false });
+    await saveItem('l', { name: 'milk', crossedOff: true }, id);
+    expect((await queue()).map((m) => m.kind)).toEqual(['putItem', 'putItem']);
+  });
+
+  it('sends a full upsert to restore a deleted item', async () => {
+    await db.items.put(known({ deletedAt: '2026-01-02T00:00:00.000Z' }));
+    await saveItem('l', { name: 'milk', crossedOff: false }, 'i1');
+    expect(await queue()).toMatchObject([{ kind: 'putItem', itemId: 'i1' }]);
+  });
+
+  it('gives a new item the first revision', async () => {
+    const id = await saveItem('l', { name: 'milk', crossedOff: false });
+    expect((await db.items.get(id))?.itemRevision).toBe(1);
   });
 });

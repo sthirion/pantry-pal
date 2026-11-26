@@ -3,6 +3,7 @@ import {
   addItem,
   alex,
   createList,
+  emptyStatePersona,
   expect,
   jo,
   openList,
@@ -85,16 +86,20 @@ test.describe('Household data isolation @TEST', () => {
   test('a household with no lists sees the empty state', async ({
     browser,
   }, testInfo) => {
-    // Given: household B never gets a list from any test
+    // Given: the worker's empty-state household never gets a list from any test
 
     // When
-    const joPage = await openSignedInPage(browser, jo, testInfo.project.use);
+    const emptyPage = await openSignedInPage(
+      browser,
+      emptyStatePersona(testInfo),
+      testInfo.project.use,
+    );
 
     // Then
     await expect(
-      joPage.getByText('No lists yet. Create your first list above.'),
+      emptyPage.getByText('No lists yet. Create your first list above.'),
     ).toBeVisible();
-    await joPage.context().close();
+    await emptyPage.context().close();
   });
 });
 

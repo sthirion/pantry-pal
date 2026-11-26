@@ -3,13 +3,14 @@ import { z } from 'zod';
 import {
   changedAtSchema,
   deleteItemsBodySchema,
+  itemMutationBodySchema,
   putItemBodySchema,
   uuidSchema,
 } from '@pantry-pal/shared';
 import type { ApiErrorDetail } from '@pantry-pal/shared';
 import type { Auth } from '../auth.js';
 import type { AppDatabase } from '../db/database.js';
-import { ValidationError } from '../errors.js';
+import { mutationRejectionResponse, ValidationError } from '../errors.js';
 import { requireHousehold, requireSession } from '../middleware.js';
 import type { ItemService } from '../services/item-service.js';
 import { collect, parseJsonBody, parseWith } from '../validation.js';
@@ -17,6 +18,13 @@ import { collect, parseJsonBody, parseWith } from '../validation.js';
 const listParamSchema = z.object({ listId: uuidSchema });
 const itemParamSchema = z.object({ listId: uuidSchema, itemId: uuidSchema });
 const deleteQuerySchema = z.object({ changedAt: changedAtSchema });
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+const MUTATION_KEYS = ['mutationId', 'baseItemRevision', 'changes'];
+
+/** A body naming any mutation field is a changed-field mutation; anything else is the legacy upsert. */
+function isItemMutationRequest(body: Record<string, unknown>): boolean {
+  return MUTATION_KEYS.some((key) => key in body);
+}
 
 /** Mounts the item routes under `/api/lists/:listId/items`, scoped to the session user's household. */
 export function registerItemRoutes(
@@ -31,9 +39,28 @@ export function registerItemRoutes(
     const params = await collect(details, () =>
       parseWith(itemParamSchema, c.req.param()),
     );
-    const body = await collect(details, () =>
-      parseJsonBody(c, putItemBodySchema),
+    const raw = await collect(details, () =>
+      parseJsonBody(c, jsonObjectSchema),
     );
+
+    if (raw && isItemMutationRequest(raw)) {
+      const mutation = await collect(details, () =>
+        parseWith(itemMutationBodySchema, raw),
+      );
+      if (!params || !mutation) throw new ValidationError(details);
+      const outcome = deps.items.mutate(
+        c.get('householdId'),
+        params.listId,
+        params.itemId,
+        mutation,
+      );
+      return outcome.status === 'accepted'
+        ? c.json(outcome.response, 200)
+        : mutationRejectionResponse(c, outcome);
+    }
+
+    const body =
+      raw && (await collect(details, () => parseWith(putItemBodySchema, raw)));
     if (!params || !body) throw new ValidationError(details);
 
     const result = deps.items.put(

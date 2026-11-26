@@ -1,3 +1,79 @@
+import type {
+  ItemChanges,
+  ItemField,
+  ItemMutationConflict,
+} from '@pantry-pal/shared';
+
+/** The mergeable view of a stored item. */
+export interface ItemValues {
+  name: string;
+  crossedOff: boolean;
+}
+
+export interface MergeDecision {
+  /** Fields whose value actually changes; empty when the mutation is a no-op. */
+  changed: ItemField[];
+  /** Overlapping fields: the server value wins and the attempted value is reported. */
+  conflicts: ItemMutationConflict[];
+}
+
+/**
+ * Splits a patch into fields to apply and fields that overlap a change newer than the patch's base.
+ * An overlapping field is always a conflict; a non-overlapping field already at its target value is a no-op.
+ */
+export function mergeChanges(
+  current: ItemValues,
+  changes: ItemChanges,
+  intervening: ReadonlySet<ItemField>,
+): MergeDecision {
+  const changed: ItemField[] = [];
+  const conflicts: ItemMutationConflict[] = [];
+  if (changes.name !== undefined) {
+    if (intervening.has('name')) {
+      conflicts.push({
+        field: 'name',
+        attemptedValue: changes.name,
+        serverValue: current.name,
+      });
+    } else if (changes.name !== current.name) {
+      changed.push('name');
+    }
+  }
+  if (changes.crossedOff !== undefined) {
+    if (intervening.has('crossedOff')) {
+      conflicts.push({
+        field: 'crossedOff',
+        attemptedValue: changes.crossedOff,
+        serverValue: current.crossedOff,
+      });
+    } else if (changes.crossedOff !== current.crossedOff) {
+      changed.push('crossedOff');
+    }
+  }
+  return { changed, conflicts };
+}
+
+/** Field-ordered JSON of a patch, so equal patches always compare equal. */
+export function canonicalChanges(changes: ItemChanges): string {
+  return JSON.stringify({
+    ...(changes.name !== undefined && { name: changes.name }),
+    ...(changes.crossedOff !== undefined && { crossedOff: changes.crossedOff }),
+  });
+}
+
+/** The fields whose stored value differs from the target, in field order. */
+export function changedFields(
+  existing: { name: string; crossedOffAt: number | null },
+  target: ItemValues,
+): ItemField[] {
+  const changed: ItemField[] = [];
+  if (existing.name !== target.name) changed.push('name');
+  if ((existing.crossedOffAt !== null) !== target.crossedOff) {
+    changed.push('crossedOff');
+  }
+  return changed;
+}
+
 /** The stored fields the item write rules depend on; timestamps are epoch milliseconds. */
 export interface ItemState {
   name: string;

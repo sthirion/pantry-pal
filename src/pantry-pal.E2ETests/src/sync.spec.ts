@@ -6,36 +6,22 @@ import {
   crossOffButton,
   deleteItem,
   expect,
-  openList,
+  joinList,
+  OFFLINE_NOTICE,
   renameItem,
   restoreButton,
-  sam,
   seedItems,
+  serverItemRecords,
   serverItems,
   startWithList,
+  syncPair,
   test,
   waitForOfflineShell,
+  waitingToSync,
 } from './journeys.js';
 
 const SYNC_DEADLINE_MS = 2_000;
 const MIN_SYNCED = 19;
-
-const OFFLINE_NOTICE = 'You are offline. Changes are saved on this device.';
-const waitingToSync = (page: Page) => page.getByText(/waiting to sync/);
-
-/** Alex signs in after the list is prepared and opens it, so he starts from the same items as Sam. */
-async function joinList(
-  openAlexPage: () => Promise<Page>,
-  listName: string,
-  activeItems: readonly string[],
-): Promise<Page> {
-  const alexPage = await openAlexPage();
-  await openList(alexPage, listName);
-  for (const item of activeItems) {
-    await expect(crossOffButton(alexPage, item)).toBeVisible();
-  }
-  return alexPage;
-}
 
 /** The accessible names of every button on the page, read in one snapshot. */
 async function buttonNames(page: Page): Promise<Set<string>> {
@@ -47,12 +33,14 @@ async function buttonNames(page: Page): Promise<Set<string>> {
   return new Set(names);
 }
 
+// Sam and Alex belong to a household only this worker uses, so no other test adds lists under their clicks.
 test.describe('Sync between household members @TEST', () => {
   test('at least 19 of 20 changes by sam reach alex within 2 seconds', async ({
     page,
-    openAlexPage,
-  }) => {
+    openPersonaPage,
+  }, testInfo) => {
     // Given
+    const { sam, alex } = syncPair(testInfo);
     const listName = await startWithList(page, sam, 'Sync twenty');
     const renames = [1, 2, 3, 4].map((n) => ({
       from: `rename-from-${n}`,
@@ -68,7 +56,7 @@ test.describe('Sync between household members @TEST', () => {
       ...deletes.map((name) => ({ name })),
       ...cleared.map((name) => ({ name, crossedOff: true })),
     ]);
-    const alexPage = await joinList(openAlexPage, listName, [
+    const alexPage = await joinList(() => openPersonaPage(alex), listName, [
       ...renames.map(({ from }) => from),
       ...crosses,
       ...deletes,
@@ -121,9 +109,10 @@ test.describe('Sync between household members @TEST', () => {
 
   test('five offline changes by sam survive a reload and reach alex after reconnecting', async ({
     page,
-    openAlexPage,
-  }) => {
+    openPersonaPage,
+  }, testInfo) => {
     // Given
+    const { sam, alex } = syncPair(testInfo);
     const listName = await startWithList(page, sam, 'Offline five');
     const added = 'added-offline';
     const crossTarget = 'cross-target';
@@ -137,14 +126,15 @@ test.describe('Sync between household members @TEST', () => {
       { name: deleteTarget },
       { name: clearTarget, crossedOff: true },
     ]);
-    const alexPage = await joinList(openAlexPage, listName, [
+    const alexPage = await joinList(() => openPersonaPage(alex), listName, [
       crossTarget,
       renameTarget,
       deleteTarget,
     ]);
     await expect(restoreButton(alexPage, clearTarget)).toBeVisible();
-    await expect(crossOffButton(page, deleteTarget)).toBeVisible();
     await waitForOfflineShell(page);
+    // The helper reloads; going offline before the app has rendered the list would cut its session check short.
+    await expect(crossOffButton(page, deleteTarget)).toBeVisible();
     await page.context().setOffline(true);
     await expect(page.getByText(OFFLINE_NOTICE)).toBeVisible();
 
@@ -187,14 +177,17 @@ test.describe('Sync between household members @TEST', () => {
 
   test("alex's later online rename and sam's earlier offline cross-off are both kept", async ({
     page,
-    openAlexPage,
-  }) => {
+    openPersonaPage,
+  }, testInfo) => {
     // Given
+    const { sam, alex } = syncPair(testInfo);
     const listName = await startWithList(page, sam, 'Conflict');
     const original = 'conflict-original';
     const renamed = 'conflict-renamed';
     await seedItems(page, [{ name: original }]);
-    const alexPage = await joinList(openAlexPage, listName, [original]);
+    const alexPage = await joinList(() => openPersonaPage(alex), listName, [
+      original,
+    ]);
     await page.context().setOffline(true);
     await expect(page.getByText(OFFLINE_NOTICE)).toBeVisible();
 
@@ -203,17 +196,24 @@ test.describe('Sync between household members @TEST', () => {
     await expect(page.getByText('1 change waiting to sync')).toBeVisible();
     await renameItem(alexPage, original, renamed);
     await expect
-      .poll(() => serverItems(alexPage))
-      .toEqual([{ name: renamed, crossedOff: false }]);
+      .poll(() => serverItemRecords(alexPage))
+      .toMatchObject([{ name: renamed, crossedOff: false, itemRevision: 2 }]);
+    const [afterRename] = await serverItemRecords(alexPage);
     await page.context().setOffline(false);
     // Sam's page shows the shared name once his queued change has been sent and answered.
     await expect(page.getByText(renamed)).toBeVisible();
     await expect(waitingToSync(page)).toHaveCount(0);
 
     // Then
+    // Sam's patch is applied on top of Alex's rename: one more item revision and a later sync cursor.
     await expect
-      .poll(() => serverItems(alexPage))
-      .toEqual([{ name: renamed, crossedOff: true }]);
+      .poll(() => serverItemRecords(alexPage))
+      .toMatchObject([{ name: renamed, crossedOff: true, itemRevision: 3 }]);
+    const [merged] = await serverItemRecords(alexPage);
+    expect(merged!.version).toBeGreaterThan(afterRename!.version);
+    await expect(
+      page.getByRole('heading', { name: 'Changes to review' }),
+    ).toHaveCount(0);
     await alexPage.reload();
     await expect(restoreButton(alexPage, renamed)).toBeVisible();
     await expect(restoreButton(page, renamed)).toBeVisible();

@@ -48,6 +48,26 @@ const EXPECTED_COLUMNS: Record<string, Col[]> = {
     ['created_at', 'INTEGER', 1, 0],
     ['updated_at', 'INTEGER', 1, 0],
     ['deleted_at', 'INTEGER', 0, 0],
+    ['item_revision', 'INTEGER', 1, 0],
+    ['pruned_through_item_revision', 'INTEGER', 1, 0],
+  ],
+  item_change: [
+    ['item_id', 'TEXT', 1, 1],
+    ['household_id', 'TEXT', 1, 0],
+    ['item_revision', 'INTEGER', 1, 2],
+    ['mutation_id', 'TEXT', 1, 0],
+    ['fields', 'TEXT', 1, 0],
+    ['created_at', 'INTEGER', 1, 0],
+  ],
+  item_mutation_receipt: [
+    ['household_id', 'TEXT', 1, 1],
+    ['mutation_id', 'TEXT', 1, 2],
+    ['item_id', 'TEXT', 1, 0],
+    ['base_item_revision', 'INTEGER', 1, 0],
+    ['changes', 'TEXT', 1, 0],
+    ['applied_fields', 'TEXT', 1, 0],
+    ['conflicts', 'TEXT', 1, 0],
+    ['created_at', 'INTEGER', 1, 0],
   ],
   item_suggestion: [
     ['household_id', 'TEXT', 1, 1],
@@ -166,6 +186,20 @@ const EXPECTED_INDEXES: Record<string, Record<string, IndexShape>> = {
       columns: ['household_id', 'version'],
     },
   },
+  item_change: {
+    item_change_created_at_idx: {
+      unique: false,
+      partial: false,
+      columns: ['created_at'],
+    },
+  },
+  item_mutation_receipt: {
+    item_mutation_receipt_item_id_idx: {
+      unique: false,
+      partial: false,
+      columns: ['item_id'],
+    },
+  },
   item_suggestion: {
     item_suggestion_household_last_used_idx: {
       unique: false,
@@ -228,7 +262,7 @@ describe('AC-1 fresh database boot and health', () => {
     const tables = appTables(db);
     db.close();
 
-    // Then exactly the 12 application tables exist
+    // Then exactly the 14 application tables exist
     expect(tables).toEqual(Object.keys(EXPECTED_COLUMNS).sort());
   });
 
@@ -289,6 +323,8 @@ describe('AC-1 fresh database boot and health', () => {
       'account.user_id->user.id',
       'household_member.household_id->household.id',
       'household_member.user_id->user.id',
+      'item_change.item_id->list_item.id',
+      'item_mutation_receipt.item_id->list_item.id',
       'list_item.list_id->shopping_list.id',
       'session.user_id->user.id',
     ]);
@@ -372,7 +408,7 @@ describe('AC-1 fresh database boot and health', () => {
     // Then change_counter has exactly {1, 0} and every other table is empty
     expect(counter).toEqual([{ id: 1, value: 0 }]);
     expect(counts.every(([, n]) => n === 0)).toBe(true);
-    expect(counts).toHaveLength(11);
+    expect(counts).toHaveLength(13);
   });
 
   it('GetHealth_WithoutAuthentication_Returns200Ok', async () => {

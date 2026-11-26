@@ -19,6 +19,7 @@ const item = (
     name,
     crossedOffAt,
     version: 1,
+    itemRevision: 1,
     updatedAt: '',
     deletedAt,
   }) as ListItem;

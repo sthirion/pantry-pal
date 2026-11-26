@@ -27,6 +27,7 @@ const item = (name: string, overrides: Partial<ListItem> = {}): ListItem => ({
   name,
   crossedOffAt: null,
   version: 1,
+  itemRevision: 1,
   updatedAt: '2026-11-01T00:00:00.000Z',
   deletedAt: null,
   ...overrides,

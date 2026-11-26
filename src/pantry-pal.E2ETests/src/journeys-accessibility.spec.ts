@@ -4,6 +4,7 @@ import {
   addItem,
   clickRowControl,
   createList,
+  emptyStatePersona,
   expect,
   jo,
   openSignedInPage,
@@ -108,14 +109,18 @@ test.describe('Accessibility of the real screens @TEST', () => {
     browser,
   }, testInfo) => {
     // Given / When
-    const joPage = await openSignedInPage(browser, jo, testInfo.project.use);
+    const emptyPage = await openSignedInPage(
+      browser,
+      emptyStatePersona(testInfo),
+      testInfo.project.use,
+    );
     await expect(
-      joPage.getByText('No lists yet. Create your first list above.'),
+      emptyPage.getByText('No lists yet. Create your first list above.'),
     ).toBeVisible();
 
     // Then
-    await expectNoAxeViolations(joPage);
-    await joPage.context().close();
+    await expectNoAxeViolations(emptyPage);
+    await emptyPage.context().close();
   });
 
   test('empty items screen has no axe violations', async ({ page }) => {

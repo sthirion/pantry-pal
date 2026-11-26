@@ -6,7 +6,7 @@ import { useSyncStatus } from '../hooks/useSyncStatus';
 /** Shows offline state, queued changes, a dropped-change error, and the sign-in prompt after a `401`. */
 export function SyncStatus() {
   const { t } = useTranslation();
-  const { online, pendingCount } = useSyncStatus();
+  const { online, pendingCount, reviewCount } = useSyncStatus();
   const { droppedStatus, authRequired } = useSyncNotices();
 
   return (
@@ -15,6 +15,9 @@ export function SyncStatus() {
         {!online && <span>{t('sync.offline')} </span>}
         {pendingCount > 0 && (
           <span>{t('sync.pending', { count: pendingCount })}</span>
+        )}
+        {reviewCount > 0 && (
+          <span> {t('sync.needsReview', { count: reviewCount })}</span>
         )}
       </p>
       {authRequired && (

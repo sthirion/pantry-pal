@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 import type { ListItem } from '@pantry-pal/shared';
 import { AddItemForm } from '../components/AddItemForm';
 import { ClearCrossedOff } from '../components/ClearCrossedOff';
+import { ItemRecovery } from '../components/ItemRecovery';
 import { ItemRow } from '../components/ItemRow';
 import { useItemActions } from '../hooks/useItemActions';
+import { useItemRecovery } from '../hooks/useItemRecovery';
 import { useListItems } from '../hooks/useListItems';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { splitItems } from '../services/itemsView';
@@ -16,9 +18,19 @@ export function ItemsPage() {
   const { listId = '' } = useParams();
   const { loaded, error, list, items } = useListItems(listId);
   const actions = useItemActions(listId);
+  const recovery = useItemRecovery(listId);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   useWakeLock();
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const { active, crossedOff } = useMemo(() => splitItems(items), [items]);
+
+  // The resolved entry disappears, so focus moves to the heading just above the remaining ones.
+  const resolve =
+    <A extends unknown[]>(action: (...args: A) => Promise<unknown>) =>
+    async (...args: A) => {
+      await action(...args);
+      headingRef.current?.focus();
+    };
 
   const toggle = (item: ListItem) => {
     setHighlightedId(null);
@@ -59,7 +71,17 @@ export function ItemsPage() {
       )}
       {loaded && !error && list !== null && (
         <>
-          <h1>{list.name}</h1>
+          <h1 ref={headingRef} tabIndex={-1}>
+            {list.name}
+          </h1>
+          <ItemRecovery
+            conflicts={recovery.conflicts}
+            blocked={recovery.blocked}
+            onKeepServer={resolve(actions.keepServerValues)}
+            onUseMine={resolve(actions.resubmitAttemptedValues)}
+            onDiscard={resolve(actions.discardBlockedEdit)}
+            onRetry={resolve(actions.resubmitBlockedEdit)}
+          />
           <AddItemForm
             items={items}
             onAdd={actions.add}

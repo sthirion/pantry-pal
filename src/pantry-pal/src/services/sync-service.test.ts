@@ -81,6 +81,7 @@ describe('SyncService.getChanges', () => {
       name: 'i1',
       crossedOffAt: null,
       version: 3,
+      itemRevision: 1,
       updatedAt: new Date(2003).toISOString(),
       deletedAt: null,
     });
