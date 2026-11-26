@@ -43,5 +43,11 @@
       "password": "cobalt-willow-ember"
     }
   },
+  "emptyState": {
+    "household": "The Emptys",
+    "name": "Eve",
+    "emailPrefix": "eve",
+    "password": "saffron-glacier-thistle"
+  },
   "suggestions": ["oat milk", "oranges", "olive oil"]
 }

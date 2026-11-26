@@ -12,9 +12,12 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     await context.setOffline(true);
 
     // When
-    await page.getByLabel('Add an item').fill('apples');
+    const addItemInput = page.getByLabel('Add an item');
+    await addItemInput.fill('apples');
     await page.getByRole('button', { name: 'Add item' }).click();
-    await page.getByLabel('Add an item').fill('pears');
+    // The form clears the draft once the add settles; typing earlier is overwritten.
+    await expect(addItemInput).toHaveValue('');
+    await addItemInput.fill('pears');
     await page.getByRole('button', { name: 'Add item' }).click();
 
     // Then
@@ -24,6 +27,9 @@ test.describe('Offline indicator and sync errors @TEST', () => {
     await expect(page.getByText('2 changes waiting to sync')).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Cross off apples' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Cross off pears' }),
     ).toBeVisible();
   });
 

@@ -22,6 +22,12 @@ interface Seed {
   households: Record<'a' | 'b' | 'c', string>;
   personas: Record<'sam' | 'alex' | 'jo' | 'pat', Persona>;
   syncPair: { household: string; sam: PairMember; alex: PairMember };
+  emptyState: {
+    household: string;
+    name: string;
+    emailPrefix: string;
+    password: string;
+  };
   suggestions: string[];
 }
 
@@ -58,6 +64,19 @@ export function syncPair(testInfo: TestInfo): {
     password,
   });
   return { sam: member(seed.syncPair.sam), alex: member(seed.syncPair.alex) };
+}
+
+/**
+ * The only member of a household that only the current worker uses and no test ever writes to (the
+ * server seeds one per worker, see server/start.mjs), so its lists screen stays empty across tests and repeats.
+ */
+export function emptyStatePersona(testInfo: TestInfo): Credentials {
+  const index = testInfo.parallelIndex;
+  if (index >= testInfo.config.workers) {
+    throw new Error(`Worker ${index} has no seeded empty-state household.`);
+  }
+  const { name, emailPrefix, password } = seed.emptyState;
+  return { name, email: `${emailPrefix}-${index}@example.com`, password };
 }
 
 /** Sign-in is limited per client address, so every browser context presents its own. */

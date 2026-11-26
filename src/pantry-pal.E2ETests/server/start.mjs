@@ -89,6 +89,20 @@ for (let index = 0; index < Number(process.env.E2E_WORKERS ?? 0); index++) {
     );
   }
 }
+// One single-member household per Playwright worker that no test writes to (see emptyStatePersona in src/journeys.ts).
+for (let index = 0; index < Number(process.env.E2E_WORKERS ?? 0); index++) {
+  await createUser(
+    db,
+    {
+      email: `${seed.emptyState.emailPrefix}-${index}@example.com`,
+      name: seed.emptyState.name,
+      household: createHousehold(db, {
+        name: `${seed.emptyState.household} ${index}`,
+      }),
+    },
+    async () => seed.emptyState.password,
+  );
+}
 const now = Date.now();
 seed.suggestions.forEach((name, index) => {
   db.insert(itemSuggestion)
