@@ -148,7 +148,7 @@ async function offlineEditWithExpiredHistory(
     { prefix },
   );
   const [item] = await serverItemRecords(setup.alexPage);
-  expireItemHistory(item!.id);
+  await expireItemHistory(item!.id);
   return setup;
 }
 
