@@ -78,7 +78,7 @@ test.describe('Accessibility @TEST', () => {
     await expectTouchTargets(page);
   });
 
-  test('offline and rejected-change messages have no axe violations', async ({
+  test('offline notice and blocked-edit recovery have no axe violations', async ({
     page,
     context,
     api,
@@ -87,9 +87,13 @@ test.describe('Accessibility @TEST', () => {
     await openMarketList(page);
     api.writeStatus = 422;
     await page.getByRole('button', { name: 'Cross off milk' }).click();
+    const review = page.getByRole('region', { name: 'Changes to review' });
     await expect(
-      page.getByRole('alert').filter({ hasText: 'error 422' }),
+      review.getByText(
+        'Your change to "milk" was not accepted (error 422). Nothing was applied.',
+      ),
     ).toBeVisible();
+    await expect(review.getByText('Your value: Yes')).toBeVisible();
     api.networkDown = true;
     await context.setOffline(true);
 
@@ -97,6 +101,7 @@ test.describe('Accessibility @TEST', () => {
     await expect(page.getByText(/You are offline/)).toBeVisible();
 
     // Then
+    await expect(review).toBeVisible();
     await expectNoAxeViolations(page);
   });
 

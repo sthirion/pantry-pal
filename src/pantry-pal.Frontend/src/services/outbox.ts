@@ -1,5 +1,5 @@
-import type { OutboxMutation } from '@pantry-pal/shared';
 import { db, type OutboxEntry } from './db';
+import type { QueuedMutation } from './outbox.types';
 
 export const BACKOFF_BASE_MS = 1000;
 export const BACKOFF_MAX_MS = 60_000;
@@ -20,7 +20,7 @@ export function classifyStatus(status: number): FailureAction {
 }
 
 /** Appends a mutation. Call inside the same Dexie transaction as the local write. */
-export async function enqueue(mutation: OutboxMutation): Promise<void> {
+export async function enqueue(mutation: QueuedMutation): Promise<void> {
   await db.outbox.add({ mutation } as OutboxEntry);
 }
 
@@ -29,34 +29,105 @@ export async function peekOldest(): Promise<OutboxEntry | undefined> {
   return db.outbox.orderBy('seq').first();
 }
 
+/** Ids of the items a queued change touches. */
+function itemIdsOf(mutation: QueuedMutation): readonly string[] {
+  switch (mutation.kind) {
+    case 'putList':
+    case 'deleteList':
+      return [];
+    case 'putItem':
+    case 'deleteItem':
+    case 'updateItem':
+      return [mutation.itemId];
+    case 'deleteItems':
+      return mutation.body.itemIds;
+  }
+}
+
+/** Ids of items whose queue is stopped on an edit the server did not accept. */
+function blockedItems(entries: readonly OutboxEntry[]): Set<string> {
+  const ids = new Set<string>();
+  for (const { mutation, blocked } of entries) {
+    if (blocked) itemIdsOf(mutation).forEach((id) => ids.add(id));
+  }
+  return ids;
+}
+
+function isStopped(entry: OutboxEntry, blocked: ReadonlySet<string>): boolean {
+  return itemIdsOf(entry.mutation).some((id) => blocked.has(id));
+}
+
+/** The oldest queued change that is not stopped behind a blocked edit of the same item. */
+export async function nextSendable(): Promise<OutboxEntry | undefined> {
+  const entries = await db.outbox.orderBy('seq').toArray();
+  const blocked = blockedItems(entries);
+  return entries.find((entry) => !isStopped(entry, blocked));
+}
+
 export async function removeEntry(seq: number): Promise<void> {
   await db.outbox.delete(seq);
 }
 
+/** Number of queued changes still waiting to be sent; stopped edits need review instead. */
 export async function pendingCount(): Promise<number> {
-  return db.outbox.count();
+  const entries = await db.outbox.toArray();
+  const blocked = blockedItems(entries);
+  return entries.filter((entry) => !isStopped(entry, blocked)).length;
 }
 
-/** Ids of the lists and items that still have queued changes. */
+/** Ids of the lists and items that still have sendable queued changes. */
 export async function pendingTargets(): Promise<Set<string>> {
+  const entries = await db.outbox.toArray();
+  const blocked = blockedItems(entries);
   const ids = new Set<string>();
-  await db.outbox.each(({ mutation }) => {
+  for (const entry of entries) {
+    if (isStopped(entry, blocked)) continue;
+    const { mutation } = entry;
     if (mutation.kind === 'putList' || mutation.kind === 'deleteList') {
       ids.add(mutation.listId);
-    } else if (mutation.kind === 'putItem' || mutation.kind === 'deleteItem') {
-      ids.add(mutation.itemId);
     } else {
-      mutation.body.itemIds.forEach((id) => ids.add(id));
+      itemIdsOf(mutation).forEach((id) => ids.add(id));
     }
-  });
+  }
   return ids;
 }
 
+/** True while a create of the item is still queued, so the server does not know it yet. */
+export async function hasQueuedCreate(itemId: string): Promise<boolean> {
+  return (
+    (await db.outbox
+      .filter(
+        ({ mutation }) =>
+          mutation.kind === 'putItem' && mutation.itemId === itemId,
+      )
+      .count()) > 0
+  );
+}
+
+/**
+ * Sets the base of the item's next unsent edit to the revision its predecessor ended on.
+ * Call inside a transaction on the outbox.
+ */
+export async function rebaseNextUnsentEdit(
+  itemId: string,
+  baseItemRevision: number,
+): Promise<void> {
+  const next = (await db.outbox.orderBy('seq').toArray()).find(
+    ({ mutation, blocked }) =>
+      !blocked && mutation.kind === 'updateItem' && mutation.itemId === itemId,
+  );
+  if (next && next.mutation.kind === 'updateItem') {
+    await db.outbox.update(next.seq, {
+      mutation: { ...next.mutation, baseItemRevision },
+    });
+  }
+}
+
 function remapMutation(
-  mutation: OutboxMutation,
+  mutation: QueuedMutation,
   oldId: string,
   newId: string,
-): OutboxMutation {
+): QueuedMutation {
   const swap = (id: string) => (id === oldId ? newId : id);
   switch (mutation.kind) {
     case 'putList':
@@ -64,6 +135,7 @@ function remapMutation(
       return { ...mutation, listId: swap(mutation.listId) };
     case 'putItem':
     case 'deleteItem':
+    case 'updateItem':
       return {
         ...mutation,
         listId: swap(mutation.listId),
@@ -88,7 +160,7 @@ export async function remapPendingIds(
     for (const entry of entries) {
       const next = remapMutation(entry.mutation, oldId, newId);
       if (JSON.stringify(next) !== JSON.stringify(entry.mutation)) {
-        await db.outbox.put({ seq: entry.seq, mutation: next });
+        await db.outbox.put({ ...entry, mutation: next });
       }
     }
   });

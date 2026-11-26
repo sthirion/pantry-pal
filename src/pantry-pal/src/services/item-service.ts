@@ -1,13 +1,33 @@
-import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, eq, inArray } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 import { nameKey } from '@pantry-pal/shared';
-import type { ListItem, PutItemBody } from '@pantry-pal/shared';
+import type {
+  ItemField,
+  ItemMutationBody,
+  ListItem,
+  PutItemBody,
+} from '@pantry-pal/shared';
 import { nextVersion } from '../db/change-counter.js';
 import type { AppDatabase, AppTransaction } from '../db/database.js';
-import { itemSuggestion, listItem, shoppingList } from '../db/schema.js';
-import { CodedHttpException } from '../errors.js';
+import { listItem } from '../db/schema.js';
 import type { HouseholdEventHub } from '../realtime/household-event-hub.js';
 import {
+  findItem,
+  findItemInScope,
+  findLiveByKey,
+  onOtherList,
+  recordSuggestion,
+  requireLiveList,
+  requireOnList,
+  toListItem,
+} from './item-access.js';
+import type { ItemRow, Outcome } from './item-access.js';
+import { recordItemChange } from './item-journal.js';
+import { applyItemMutation } from './item-mutation.js';
+import type { ItemMutationResult } from './item-mutation.js';
+import {
+  changedFields,
   crossedOffAtFor,
   decideDelete,
   isBatchEligible,
@@ -15,8 +35,6 @@ import {
   isPutIgnored,
   renamesItem,
 } from './item-rules.js';
-
-type ItemRow = typeof listItem.$inferSelect;
 
 export interface PutItemResult {
   created: boolean;
@@ -28,52 +46,6 @@ export interface PutItemResult {
 export type DeleteItemResult =
   | { status: 'deleted' }
   | { status: 'stale'; item: ListItem };
-
-/** What a write transaction returns; `version` is set only when a new shared version was assigned. */
-interface Outcome<T> {
-  result: T;
-  version?: number;
-}
-
-export function toListItem(row: ItemRow): ListItem {
-  return {
-    id: row.id,
-    listId: row.listId,
-    name: row.name,
-    crossedOffAt:
-      row.crossedOffAt === null
-        ? null
-        : new Date(row.crossedOffAt).toISOString(),
-    version: row.version,
-    updatedAt: new Date(row.updatedAt).toISOString(),
-    deletedAt:
-      row.deletedAt === null ? null : new Date(row.deletedAt).toISOString(),
-  };
-}
-
-function onOtherList(): CodedHttpException {
-  return new CodedHttpException(409, 'item_on_other_list');
-}
-
-function findLiveByKey(
-  tx: AppTransaction,
-  listId: string,
-  key: string,
-  excludeId?: string,
-): ItemRow | undefined {
-  return tx
-    .select()
-    .from(listItem)
-    .where(
-      and(
-        eq(listItem.listId, listId),
-        eq(listItem.nameKey, key),
-        isNull(listItem.deletedAt),
-        excludeId === undefined ? undefined : ne(listItem.id, excludeId),
-      ),
-    )
-    .get();
-}
 
 export class ItemService {
   constructor(
@@ -92,18 +64,49 @@ export class ItemService {
     const changedAt = this.clamp(body.changedAt);
     const key = nameKey(body.name);
     const outcome = this.db.transaction((tx): Outcome<PutItemResult> => {
-      this.requireLiveList(tx, householdId, listId);
-      const existing = this.findItem(tx, itemId);
+      requireLiveList(tx, householdId, listId);
+      const existing = findItemInScope(tx, householdId, listId, itemId);
       if (existing) {
-        this.requireOnList(existing, householdId, listId);
         return this.putExisting(tx, existing, body, key, changedAt);
       }
-      const sameName = findLiveByKey(tx, listId, key);
+      this.reserveId(
+        tx,
+        householdId,
+        listId,
+        itemId,
+        body.name,
+        key,
+        changedAt,
+      );
+      const sameName = findLiveByKey(tx, listId, key, itemId);
       if (sameName) {
+        tx.delete(listItem)
+          .where(
+            and(
+              eq(listItem.id, itemId),
+              eq(listItem.householdId, householdId),
+              eq(listItem.listId, listId),
+            ),
+          )
+          .run();
         return this.merge(tx, sameName, itemId, body.crossedOff, changedAt);
       }
-      return this.create(tx, householdId, listId, itemId, body, key, changedAt);
+      return this.create(tx, itemId, body, key, changedAt);
     });
+    this.publish(householdId, outcome);
+    return outcome.result;
+  }
+
+  /** Merges a changed-field patch against the item's journal; the server wins overlapping fields. */
+  mutate(
+    householdId: string,
+    listId: string,
+    itemId: string,
+    body: ItemMutationBody,
+  ): ItemMutationResult {
+    const outcome = this.db.transaction((tx) =>
+      applyItemMutation(tx, this.now(), householdId, listId, itemId, body),
+    );
     this.publish(householdId, outcome);
     return outcome.result;
   }
@@ -117,10 +120,10 @@ export class ItemService {
   ): DeleteItemResult {
     const changedAt = this.clamp(changedAtIso);
     const outcome = this.db.transaction((tx): Outcome<DeleteItemResult> => {
-      this.requireLiveList(tx, householdId, listId);
-      const existing = this.findItem(tx, itemId);
+      requireLiveList(tx, householdId, listId);
+      const existing = findItem(tx, itemId);
       if (!existing) return { result: { status: 'deleted' } };
-      this.requireOnList(existing, householdId, listId);
+      requireOnList(existing, householdId, listId);
       const decision = decideDelete(existing, changedAt);
       if (decision === 'missing') return { result: { status: 'deleted' } };
       if (decision === 'stale') {
@@ -147,7 +150,7 @@ export class ItemService {
     const changedAt = this.clamp(changedAtIso);
     const ids = [...new Set(itemIds)];
     const outcome = this.db.transaction((tx): Outcome<undefined> => {
-      this.requireLiveList(tx, householdId, listId);
+      requireLiveList(tx, householdId, listId);
       const rows = tx
         .select()
         .from(listItem)
@@ -181,34 +184,17 @@ export class ItemService {
     }
   }
 
-  /** A list of another household is `403`; a missing or soft-deleted list of this household is `404`. */
-  private requireLiveList(
-    tx: AppTransaction,
-    householdId: string,
-    listId: string,
-  ): void {
-    const list = tx
-      .select()
-      .from(shoppingList)
-      .where(eq(shoppingList.id, listId))
-      .get();
-    if (list && list.householdId !== householdId) {
-      throw new HTTPException(403);
-    }
-    if (!list || list.deletedAt !== null) throw new HTTPException(404);
-  }
-
-  private findItem(tx: AppTransaction, id: string): ItemRow | undefined {
-    return tx.select().from(listItem).where(eq(listItem.id, id)).get();
-  }
-
-  private requireOnList(
-    row: ItemRow,
-    householdId: string,
-    listId: string,
-  ): void {
-    if (row.householdId !== householdId) throw new HTTPException(403);
-    if (row.listId !== listId) throw onOtherList();
+  /** Journals a legacy write's changed fields under a server-generated mutation id. */
+  private journal(tx: AppTransaction, row: ItemRow, fields: ItemField[]): void {
+    if (fields.length === 0) return;
+    recordItemChange(tx, {
+      householdId: row.householdId,
+      itemId: row.id,
+      itemRevision: row.itemRevision,
+      mutationId: randomUUID(),
+      fields,
+      createdAt: this.now(),
+    });
   }
 
   private putExisting(
@@ -230,6 +216,10 @@ export class ItemService {
     if (findLiveByKey(tx, existing.listId, key, existing.id)) {
       throw new HTTPException(409);
     }
+    const changed = changedFields(existing, {
+      name: body.name,
+      crossedOff: body.crossedOff,
+    });
     const version = nextVersion(tx);
     const row = tx
       .update(listItem)
@@ -244,12 +234,14 @@ export class ItemService {
         updatedAt: changedAt,
         deletedAt: null,
         version,
+        itemRevision: existing.itemRevision + (changed.length > 0 ? 1 : 0),
       })
       .where(eq(listItem.id, existing.id))
       .returning()
       .get();
+    this.journal(tx, row, changed);
     if (renamesItem(existing, body.name)) {
-      this.recordSuggestion(tx, existing.householdId, key, body.name);
+      recordSuggestion(tx, existing.householdId, key, body.name, this.now());
     }
     return {
       result: { created: false, item: toListItem(row), applied: true },
@@ -275,6 +267,7 @@ export class ItemService {
         },
       };
     }
+    const changed = changedFields(target, { name: target.name, crossedOff });
     const version = nextVersion(tx);
     const row = tx
       .update(listItem)
@@ -286,10 +279,12 @@ export class ItemService {
         ),
         updatedAt: changedAt,
         version,
+        itemRevision: target.itemRevision + (changed.length > 0 ? 1 : 0),
       })
       .where(eq(listItem.id, target.id))
       .returning()
       .get();
+    this.journal(tx, row, changed);
     return {
       result: {
         created: false,
@@ -301,10 +296,43 @@ export class ItemService {
     };
   }
 
-  private create(
+  /**
+   * Claims an unused id with a tombstoned candidate row and no cursor advance. An id already taken outside this
+   * household and list answers 404, like a missing item, without a lookup by id alone. The candidate is either
+   * deleted (merge) or finalized (create) in the same transaction, so it never escapes.
+   */
+  private reserveId(
     tx: AppTransaction,
     householdId: string,
     listId: string,
+    id: string,
+    name: string,
+    key: string,
+    changedAt: number,
+  ): void {
+    const reserved = tx
+      .insert(listItem)
+      .values({
+        id,
+        householdId,
+        listId,
+        name,
+        nameKey: key,
+        crossedOffAt: null,
+        version: 0,
+        createdAt: this.now(),
+        updatedAt: changedAt,
+        deletedAt: changedAt,
+      })
+      .onConflictDoNothing({ target: listItem.id })
+      .returning({ id: listItem.id })
+      .get();
+    if (!reserved) throw new HTTPException(404);
+  }
+
+  /** Finalizes the reserved candidate as a live item under exactly one new household version. */
+  private create(
+    tx: AppTransaction,
     id: string,
     body: PutItemBody,
     key: string,
@@ -312,42 +340,21 @@ export class ItemService {
   ): Outcome<PutItemResult> {
     const version = nextVersion(tx);
     const row = tx
-      .insert(listItem)
-      .values({
-        id,
-        householdId,
-        listId,
-        name: body.name,
-        nameKey: key,
+      .update(listItem)
+      .set({
         crossedOffAt: crossedOffAtFor(null, body.crossedOff, changedAt),
         version,
         createdAt: this.now(),
         updatedAt: changedAt,
         deletedAt: null,
       })
+      .where(eq(listItem.id, id))
       .returning()
       .get();
-    this.recordSuggestion(tx, householdId, key, body.name);
+    recordSuggestion(tx, row.householdId, key, body.name, this.now());
     return {
       result: { created: true, item: toListItem(row), applied: true },
       version,
     };
-  }
-
-  /** Counts a use of the name; an existing suggestion keeps its stored display name. */
-  private recordSuggestion(
-    tx: AppTransaction,
-    householdId: string,
-    key: string,
-    name: string,
-  ): void {
-    const lastUsedAt = this.now();
-    tx.insert(itemSuggestion)
-      .values({ householdId, nameKey: key, name, useCount: 1, lastUsedAt })
-      .onConflictDoUpdate({
-        target: [itemSuggestion.householdId, itemSuggestion.nameKey],
-        set: { useCount: sql`${itemSuggestion.useCount} + 1`, lastUsedAt },
-      })
-      .run();
   }
 }

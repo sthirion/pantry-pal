@@ -1,18 +1,23 @@
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDatabase, openSqlite, runMigrations } from '../db/database.js';
 import type { AppDatabase } from '../db/database.js';
 import {
+  itemChange,
   listItem,
   maintenanceState,
   shoppingList,
   syncState,
 } from '../db/schema.js';
 import {
+  JOURNAL_PRUNE_INTERVAL_MS,
   MaintenanceService,
   msUntilNextRun,
+  startJournalPruneScheduler,
   startMaintenanceScheduler,
 } from './maintenance-service.js';
 
+const HOUR = 60 * 60 * 1000;
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.parse('2026-11-13T12:00:00.000Z');
 
@@ -314,6 +319,164 @@ describe('startMaintenanceScheduler', () => {
     const stop = startMaintenanceScheduler(service, { onError });
 
     expect(onError).toHaveBeenCalledWith(failure);
+    stop();
+  });
+});
+
+function addChange(itemId: string, itemRevision: number, createdAt: number) {
+  db.insert(itemChange)
+    .values({
+      itemId,
+      householdId: 'h1',
+      itemRevision,
+      mutationId: `m-${itemId}-${itemRevision}`,
+      fields: '["name"]',
+      createdAt,
+    })
+    .run();
+}
+
+const journalRevisions = (itemId: string) =>
+  db
+    .select({ revision: itemChange.itemRevision })
+    .from(itemChange)
+    .where(eq(itemChange.itemId, itemId))
+    .orderBy(itemChange.itemRevision)
+    .all()
+    .map((r) => r.revision);
+const watermark = (itemId: string) =>
+  db.select().from(listItem).where(eq(listItem.id, itemId)).get()
+    ?.prunedThroughItemRevision;
+
+describe('MaintenanceService.pruneItemJournal', () => {
+  beforeEach(() => {
+    addList('l', 'h1', 1, null);
+    addItem('a', 'l', 'h1', 2, null);
+    addItem('b', 'l', 'h1', 3, null);
+  });
+
+  it('deletes entries at least 25 hours old and keeps younger ones', () => {
+    addChange('a', 2, NOW - 26 * HOUR);
+    addChange('a', 3, NOW - 25 * HOUR);
+    addChange('a', 4, NOW - 25 * HOUR + 1);
+    addChange('a', 5, NOW - 24 * HOUR);
+
+    expect(service.pruneItemJournal()).toBe(2);
+    expect(journalRevisions('a')).toEqual([4, 5]);
+  });
+
+  it('raises the watermark to the greatest deleted revision per item', () => {
+    addChange('a', 2, NOW - 30 * HOUR);
+    addChange('a', 3, NOW - 26 * HOUR);
+    addChange('a', 4, NOW - 1 * HOUR);
+    addChange('b', 2, NOW - 26 * HOUR);
+
+    service.pruneItemJournal();
+
+    expect(watermark('a')).toBe(3);
+    expect(watermark('b')).toBe(2);
+  });
+
+  it('leaves the watermark alone for an item with nothing to prune', () => {
+    addChange('a', 2, NOW - 1 * HOUR);
+
+    expect(service.pruneItemJournal()).toBe(0);
+    expect(watermark('a')).toBe(0);
+  });
+
+  it('never lowers an existing watermark', () => {
+    db.$client.exec(
+      "UPDATE list_item SET pruned_through_item_revision = 9 WHERE id = 'a'",
+    );
+    addChange('a', 2, NOW - 30 * HOUR);
+
+    service.pruneItemJournal();
+
+    expect(watermark('a')).toBe(9);
+  });
+
+  it('rolls back the deletes and watermarks when the watermark update fails', () => {
+    addChange('a', 2, NOW - 30 * HOUR);
+    db.$client.exec(
+      "CREATE TRIGGER fail_watermark BEFORE UPDATE ON list_item BEGIN SELECT RAISE(ABORT, 'watermark failed'); END",
+    );
+
+    expect(() => service.pruneItemJournal()).toThrow('watermark failed');
+    expect(journalRevisions('a')).toEqual([2]);
+    expect(watermark('a')).toBe(0);
+  });
+
+  it('rolls back the watermarks when the delete fails', () => {
+    addChange('a', 2, NOW - 30 * HOUR);
+    db.$client.exec(
+      "CREATE TRIGGER fail_delete BEFORE DELETE ON item_change BEGIN SELECT RAISE(ABORT, 'delete failed'); END",
+    );
+
+    expect(() => service.pruneItemJournal()).toThrow('delete failed');
+    expect(journalRevisions('a')).toEqual([2]);
+    expect(watermark('a')).toBe(0);
+  });
+});
+
+describe('startJournalPruneScheduler', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    return () => vi.useRealTimers();
+  });
+
+  it('prunes at startup and then every hour', () => {
+    const prune = vi.spyOn(service, 'pruneItemJournal');
+    const stop = startJournalPruneScheduler(service);
+
+    expect(prune).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(JOURNAL_PRUNE_INTERVAL_MS - 1);
+    expect(prune).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(prune).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('stops pruning once the stop function is called', () => {
+    const prune = vi.spyOn(service, 'pruneItemJournal');
+    const stop = startJournalPruneScheduler(service);
+
+    stop();
+    vi.advanceTimersByTime(3 * HOUR);
+
+    expect(prune).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed run and keeps scheduling', () => {
+    const onError = vi.fn();
+    const failure = new Error('boom');
+    vi.spyOn(service, 'pruneItemJournal').mockImplementation(() => {
+      throw failure;
+    });
+    const stop = startJournalPruneScheduler(service, { onError });
+
+    vi.advanceTimersByTime(HOUR);
+
+    expect(onError).toHaveBeenCalledWith(failure);
+    expect(onError).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('keeps scheduling when the error handler itself throws', () => {
+    const prune = vi
+      .spyOn(service, 'pruneItemJournal')
+      .mockImplementation(() => {
+        throw new Error('boom');
+      });
+    const stop = startJournalPruneScheduler(service, {
+      onError: () => {
+        throw new Error('handler down');
+      },
+    });
+
+    vi.advanceTimersByTime(HOUR);
+
+    expect(prune).toHaveBeenCalledTimes(2);
     stop();
   });
 });

@@ -49,6 +49,8 @@ describe('database', () => {
         'sync_state',
         'maintenance_state',
         'change_counter',
+        'item_change',
+        'item_mutation_receipt',
       ]),
     );
     expect(
@@ -74,7 +76,7 @@ describe('database', () => {
     expect(() =>
       sqlite
         .prepare(
-          "INSERT INTO list_item VALUES ('i','h','nope','n','n',NULL,1,1,1,NULL)",
+          "INSERT INTO list_item (id, household_id, list_id, name, name_key, crossed_off_at, version, created_at, updated_at, deleted_at) VALUES ('i','h','nope','n','n',NULL,1,1,1,NULL)",
         )
         .run(),
     ).toThrow(/FOREIGN KEY/);

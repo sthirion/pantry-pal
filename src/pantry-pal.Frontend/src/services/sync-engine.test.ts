@@ -1,8 +1,13 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ListItem, ShoppingList, SyncResponse } from '@pantry-pal/shared';
+import type {
+  ItemMutationResponse,
+  ListItem,
+  ShoppingList,
+  SyncResponse,
+} from '@pantry-pal/shared';
 import { ApiError } from './apiClient';
-import { clearAllStores, db, getMeta, setMeta } from './db';
+import { clearAllStores, db, getMeta, PantryDb, setMeta } from './db';
 import { saveItem, saveList } from './mutations';
 import { SyncEngine } from './sync-engine';
 
@@ -21,6 +26,7 @@ const item = (id: string, listId: string, version = 1): ListItem => ({
   name: id,
   crossedOffAt: null,
   version,
+  itemRevision: 1,
   updatedAt: '2026-01-01T00:00:00.000Z',
   deletedAt: null,
 });
@@ -42,6 +48,7 @@ function makeEngine(
     async (path: string, init?: { method?: string; body?: unknown }) => {
       const result = handler(path, init);
       if (result instanceof Error) throw result;
+      if (typeof result === 'function') return result(init);
       return result;
     },
   );
@@ -497,21 +504,41 @@ describe('triggers', () => {
     );
     await settle();
     request.mockClear();
-    listeners.changed!({ data: '{"version":5}' } as MessageEvent<string>);
+    listeners.changed!({ data: '5' } as MessageEvent<string>);
     await settle();
     expect(request).not.toHaveBeenCalled();
-    listeners.changed!({ data: '{"version":6}' } as MessageEvent<string>);
+    listeners.changed!({ data: '6' } as MessageEvent<string>);
     await settle();
     expect(request).toHaveBeenCalledWith('/api/sync?since=5');
     engine.stop();
   });
 
+  it('pulls on a bare numeric SSE payload as the server sends it', async () => {
+    await setMeta('cursor', 5);
+    const { engine, listeners, request } = start(() =>
+      snapshot({ version: 5 }),
+    );
+    await settle();
+    request.mockClear();
+    listeners.changed!({ data: '42' } as MessageEvent<string>);
+    await settle();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith('/api/sync?since=5');
+    engine.stop();
+  });
+
   it('ignores malformed SSE payloads', async () => {
-    const { engine, listeners, request } = start();
+    await setMeta('cursor', 5);
+    const { engine, listeners, request } = start(() =>
+      snapshot({ version: 5 }),
+    );
     await settle();
     request.mockClear();
     listeners.changed!({ data: 'nope' } as MessageEvent<string>);
-    listeners.changed!({ data: '{"version":"x"}' } as MessageEvent<string>);
+    listeners.changed!({ data: '' } as MessageEvent<string>);
+    listeners.changed!({ data: '{"version":6}' } as MessageEvent<string>);
+    // Number(' 6 ') coerces to 6 (> cursor 5), so only the digits-only guard blocks it.
+    listeners.changed!({ data: ' 6 ' } as MessageEvent<string>);
     await settle();
     expect(request).not.toHaveBeenCalled();
     engine.stop();
@@ -544,5 +571,529 @@ describe('triggers', () => {
     await settle();
     expect(request).toHaveBeenCalledTimes(1);
     engine.stop();
+  });
+});
+
+describe('item updates', () => {
+  const rowOf = (id: string, over: Partial<ListItem> = {}): ListItem => ({
+    ...item(id, 'l1'),
+    itemRevision: 14,
+    ...over,
+  });
+  const response = (
+    mutationId: string,
+    row: ListItem,
+    over: Partial<ItemMutationResponse> = {},
+  ): ItemMutationResponse => ({
+    mutationId,
+    item: row,
+    itemRevision: row.itemRevision,
+    version: 40,
+    appliedFields: [],
+    conflicts: [],
+    replayed: false,
+    ...over,
+  });
+  // Answers with the id of the mutation actually sent, as the server does.
+  const accepted =
+    (row: ListItem, over: Partial<ItemMutationResponse> = {}) =>
+    (init?: { body?: unknown }) =>
+      response((init?.body as { mutationId: string }).mutationId, row, over);
+  const rejected = (code: string, row: ListItem, status = 409): ApiError =>
+    new ApiError(status, {
+      error: { code, message: 'x' },
+      item: row,
+      itemRevision: row.itemRevision,
+      version: 40,
+    });
+  const CROSSED_AT = '2026-01-02T00:00:00.000Z';
+  // The server's answer to a cross-off applied on top of base revision 14.
+  const crossedRow = (id: string, over: Partial<ListItem> = {}) =>
+    rowOf(id, { crossedOffAt: CROSSED_AT, itemRevision: 15, ...over });
+  const crossOff = (id: string) =>
+    saveItem('l1', { name: id, crossedOff: true }, id);
+  const rename = (id: string, name: string) =>
+    saveItem('l1', { name, crossedOff: true }, id);
+  const queued = async () => await db.outbox.toArray();
+  const bodies = (request: ReturnType<typeof vi.fn>) =>
+    writes(request).map(([, init]) => init.body);
+
+  it('sends the persisted patch with its item, base revision, and mutation id', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const [entry] = await queued();
+    const { engine, request } = makeEngine(() =>
+      accepted(crossedRow('i1'), { appliedFields: ['crossedOff'] }),
+    );
+    await engine.flush();
+    expect(request).toHaveBeenCalledWith('/api/lists/l1/items/i1', {
+      method: 'PUT',
+      body: {
+        mutationId: entry!.mutation.id,
+        baseItemRevision: 14,
+        changes: { crossedOff: true },
+      },
+    });
+  });
+
+  it('takes the accepted item and its revision but leaves the household cursor alone', async () => {
+    await setMeta('cursor', 3);
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const server = rowOf('i1', {
+      crossedOffAt: '2026-01-02T00:00:00.000Z',
+      itemRevision: 15,
+      version: 40,
+    });
+    const { engine } = makeEngine(() =>
+      accepted(server, { appliedFields: ['crossedOff'] }),
+    );
+    await engine.flush();
+    expect(await db.outbox.count()).toBe(0);
+    expect(await db.items.get('i1')).toEqual(server);
+    expect(await getMeta('cursor')).toBe(3);
+  });
+
+  it('settles a fresh response that applies nothing when the item already holds the attempted value', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const server = rowOf('i1', { crossedOffAt: '2026-01-02T00:00:00.000Z' });
+    const { engine, request } = makeEngine(() => accepted(server));
+    await engine.flush();
+    expect(writes(request)).toHaveLength(1);
+    expect(await db.outbox.count()).toBe(0);
+    expect(await db.items.get('i1')).toEqual(server);
+  });
+
+  it('sends the next edit of an item only after the first is accepted, based on the returned revision', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    await rename('i1', 'Renamed');
+    const { engine, request } = makeEngine(() =>
+      writes(request).length === 1
+        ? accepted(crossedRow('i1'), { appliedFields: ['crossedOff'] })
+        : accepted(crossedRow('i1', { name: 'Renamed', itemRevision: 16 }), {
+            appliedFields: ['name'],
+          }),
+    );
+    await engine.flush();
+    expect(bodies(request)).toMatchObject([
+      { baseItemRevision: 14, changes: { crossedOff: true } },
+      { baseItemRevision: 15, changes: { name: 'Renamed' } },
+    ]);
+  });
+
+  it('retries after a failure with the same mutation id and identical payload', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const results = [
+      new ApiError(503),
+      new TypeError('offline'),
+      accepted(crossedRow('i1'), { appliedFields: ['crossedOff'] }),
+    ];
+    const { engine, request } = makeEngine(() => results.shift());
+    await engine.flush();
+    const sent = bodies(request);
+    expect(sent).toHaveLength(3);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[2]).toEqual(sent[0]);
+  });
+
+  it('keeps the same payload across a reload of the queue', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const reopened = new PantryDb();
+    const [stored] = await reopened.outbox.toArray();
+    reopened.close();
+    const { engine, request } = makeEngine(() =>
+      accepted(crossedRow('i1'), { appliedFields: ['crossedOff'] }),
+    );
+    await engine.flush();
+    expect(bodies(request)[0]).toEqual({
+      mutationId: stored!.mutation.id,
+      baseItemRevision: 14,
+      changes: { crossedOff: true },
+    });
+  });
+
+  it('keeps the attempted value of an accepted conflict, shows the server value, and does not retry', async () => {
+    await db.items.put(rowOf('i1'));
+    await rename('i1', 'Offline name');
+    const [entry] = await queued();
+    const server = rowOf('i1', {
+      name: 'Online name',
+      crossedOffAt: '2026-01-02T00:00:00.000Z',
+      itemRevision: 16,
+    });
+    const conflicts: ItemMutationResponse['conflicts'] = [
+      {
+        field: 'name',
+        attemptedValue: 'Offline name',
+        serverValue: 'Online name',
+      },
+    ];
+    const { engine, request } = makeEngine(() =>
+      accepted(server, { conflicts, appliedFields: ['crossedOff'] }),
+    );
+    await engine.flush();
+    await engine.flush();
+    expect(writes(request)).toHaveLength(1);
+    expect(await db.outbox.count()).toBe(0);
+    expect((await db.items.get('i1'))?.name).toBe('Online name');
+    const reopened = new PantryDb();
+    const records = await reopened.itemConflicts.toArray();
+    reopened.close();
+    expect(records).toMatchObject([
+      { mutationId: entry!.mutation.id, itemId: 'i1', listId: 'l1', conflicts },
+    ]);
+  });
+
+  it.each([
+    ['BASE_VERSION_EXPIRED'],
+    ['BASE_VERSION_AHEAD'],
+    ['MUTATION_ID_REUSED'],
+  ])(
+    'blocks the edit on %s, keeps its whole patch, and refreshes the item',
+    async (code) => {
+      await db.items.put(rowOf('i1'));
+      await crossOff('i1');
+      const [entry] = await queued();
+      const server = rowOf('i1', { name: 'Server name', itemRevision: 20 });
+      const { engine, request, onError } = makeEngine(() =>
+        rejected(code, server),
+      );
+      await engine.flush();
+      await engine.flush();
+      expect(writes(request)).toHaveLength(1);
+      expect(onError).not.toHaveBeenCalled();
+      expect(await queued()).toEqual([
+        {
+          seq: entry!.seq,
+          mutation: entry!.mutation,
+          blocked: { reason: code, status: 409, serverItemRevision: 20 },
+        },
+      ]);
+      expect(await db.items.get('i1')).toEqual(server);
+    },
+  );
+
+  it('blocks later edits of the same item but still sends other items', async () => {
+    await db.items.put(rowOf('i1'));
+    await db.items.put(rowOf('i2'));
+    await crossOff('i1');
+    await rename('i1', 'Renamed');
+    await crossOff('i2');
+    const { engine, request } = makeEngine((path) =>
+      path.endsWith('/i1')
+        ? rejected('BASE_VERSION_EXPIRED', rowOf('i1', { itemRevision: 20 }))
+        : accepted(crossedRow('i2'), { appliedFields: ['crossedOff'] }),
+    );
+    await engine.flush();
+    expect(writes(request).map(([path]) => path)).toEqual([
+      '/api/lists/l1/items/i1',
+      '/api/lists/l1/items/i2',
+    ]);
+    expect((await queued()).map((e) => e.mutation.kind)).toEqual([
+      'updateItem',
+      'updateItem',
+    ]);
+    expect(await db.items.get('i2')).toMatchObject({ itemRevision: 15 });
+  });
+
+  it('keeps the patch blocked after another status and refreshes everything with a full pull', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const server = rowOf('i1', { name: 'Server name', itemRevision: 16 });
+    const { engine, request, onError } = makeEngine((path) =>
+      path.startsWith('/api/sync')
+        ? snapshot({ items: [server] })
+        : new ApiError(404),
+    );
+    await engine.flush();
+    expect(request).toHaveBeenCalledWith('/api/sync?since=0');
+    expect(onError).not.toHaveBeenCalled();
+    expect(await queued()).toMatchObject([
+      {
+        mutation: { kind: 'updateItem', changes: { crossedOff: true } },
+        blocked: { reason: 'rejected', status: 404 },
+      },
+    ]);
+    expect(await db.items.get('i1')).toEqual(server);
+  });
+
+  it('keeps the validation details of a 400 with the patch across a reload', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const details = [
+      { path: 'changes.name', message: 'Must be 1 to 200 characters.' },
+    ];
+    const { engine } = makeEngine((path) =>
+      path.startsWith('/api/sync')
+        ? snapshot({ items: [rowOf('i1')] })
+        : new ApiError(400, {
+            error: { code: 'validation_failed', message: 'x', details },
+          }),
+    );
+    await engine.flush();
+    const reopened = new PantryDb();
+    const stored = await reopened.outbox.toArray();
+    reopened.close();
+    expect(stored).toMatchObject([
+      {
+        mutation: { kind: 'updateItem', changes: { crossedOff: true } },
+        blocked: { reason: 'rejected', status: 400, details },
+      },
+    ]);
+  });
+
+  it('keeps the patch queued and blocked on 403', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const { engine, onError } = makeEngine((path) =>
+      path.startsWith('/api/sync')
+        ? snapshot({ items: [rowOf('i1')] })
+        : new ApiError(403),
+    );
+    await engine.flush();
+    expect(onError).not.toHaveBeenCalled();
+    expect(await queued()).toMatchObject([
+      {
+        mutation: { changes: { crossedOff: true } },
+        blocked: { reason: 'rejected', status: 403 },
+      },
+    ]);
+  });
+
+  it('lets a pull refresh an item whose edit is blocked', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const { engine } = makeEngine((path) =>
+      path.startsWith('/api/sync')
+        ? snapshot({
+            items: [rowOf('i1', { name: 'Newer', itemRevision: 30 })],
+          })
+        : rejected('BASE_VERSION_EXPIRED', rowOf('i1', { itemRevision: 20 })),
+    );
+    await engine.flush();
+    await engine.pull();
+    expect(await db.items.get('i1')).toMatchObject({
+      name: 'Newer',
+      itemRevision: 30,
+    });
+  });
+
+  // Each case turns the one valid answer to the first edit (`crossedOff: true` on base 14) into a bad 2xx body.
+  const omit = (key: keyof ItemMutationResponse) => (v: ItemMutationResponse) =>
+    Object.fromEntries(Object.entries(v).filter(([k]) => k !== key));
+  const withItem =
+    (over: Partial<ListItem>, top: Partial<ItemMutationResponse> = {}) =>
+    (v: ItemMutationResponse) => ({
+      ...v,
+      ...top,
+      item: { ...v.item, ...over },
+    });
+  const withTop =
+    (over: Record<string, unknown>) => (v: ItemMutationResponse) => ({
+      ...v,
+      ...over,
+    });
+  // Server value kept for crossedOff: nothing applied, item still uncrossed.
+  const conflicted = (conflicts: unknown) =>
+    withItem(
+      { crossedOffAt: null },
+      {
+        appliedFields: [],
+        conflicts: conflicts as ItemMutationResponse['conflicts'],
+      },
+    );
+  const crossedConflict = {
+    field: 'crossedOff',
+    attemptedValue: true,
+    serverValue: false,
+  };
+  const invalidBodies: Array<[string, (v: ItemMutationResponse) => unknown]> = [
+    ['empty', () => undefined],
+    ['non-object', () => 'ok'],
+    ['without an item', omit('item')],
+    ['without conflicts', omit('conflicts')],
+    ['without a mutation id', omit('mutationId')],
+    ['without an item revision', omit('itemRevision')],
+    ['without a household version', omit('version')],
+    ['without applied fields', omit('appliedFields')],
+    ['without replayed', omit('replayed')],
+    ['another mutation id', withTop({ mutationId: 'someone-else' })],
+    ['another item id', withItem({ id: 'i2' })],
+    ['another list id', withItem({ listId: 'l2' })],
+    ['a deleted item', withItem({ deletedAt: '2026-01-03T00:00:00.000Z' })],
+    ['a revision that disagrees with the item', withTop({ itemRevision: 16 })],
+    ['a zero revision', withItem({ itemRevision: 0 }, { itemRevision: 0 })],
+    [
+      'a fractional revision',
+      withItem({ itemRevision: 15.5 }, { itemRevision: 15.5 }),
+    ],
+    [
+      'an unsafe revision',
+      withItem(
+        { itemRevision: Number.MAX_SAFE_INTEGER + 1 },
+        { itemRevision: Number.MAX_SAFE_INTEGER + 1 },
+      ),
+    ],
+    [
+      'a revision below the submitted base',
+      withItem({ itemRevision: 13 }, { itemRevision: 13 }),
+    ],
+    [
+      'applied fields without a revision advance',
+      withItem({ itemRevision: 14 }, { itemRevision: 14 }),
+    ],
+    ['a negative household version', withTop({ version: -1 })],
+    ['a fractional household version', withTop({ version: 40.5 })],
+    ['a string household version', withTop({ version: '40' })],
+    [
+      'an unsafe household version',
+      withTop({ version: Number.MAX_SAFE_INTEGER + 1 }),
+    ],
+    ['a version below the item version', withItem({ version: 41 })],
+    ['applied fields that are not an array', withTop({ appliedFields: 'x' })],
+    ['an unknown applied field', withTop({ appliedFields: ['version'] })],
+    [
+      'an applied field that was not patched',
+      withTop({ appliedFields: ['name'] }),
+    ],
+    [
+      'a duplicated applied field',
+      withTop({ appliedFields: ['crossedOff', 'crossedOff'] }),
+    ],
+    [
+      'an applied value the item does not have',
+      withItem({ crossedOffAt: null }),
+    ],
+    ['a non-boolean replayed', withTop({ replayed: 'false' })],
+    ['conflicts that are not an array', withTop({ conflicts: {} })],
+    ['a null conflict', conflicted([null])],
+    [
+      'an unknown conflict field',
+      conflicted([{ ...crossedConflict, field: 'id' }]),
+    ],
+    [
+      'a conflict with a mistyped attempted value',
+      conflicted([{ ...crossedConflict, attemptedValue: 'true' }]),
+    ],
+    [
+      'a conflict with a mistyped server value',
+      conflicted([{ ...crossedConflict, serverValue: 'false' }]),
+    ],
+    [
+      'a conflict for a field that was not patched',
+      conflicted([{ field: 'name', attemptedValue: 'x', serverValue: 'i1' }]),
+    ],
+    [
+      'a conflict whose attempted value was not submitted',
+      conflicted([{ ...crossedConflict, attemptedValue: false }]),
+    ],
+    [
+      'a conflict whose server value is not the item value',
+      conflicted([{ ...crossedConflict, serverValue: true }]),
+    ],
+    ['a duplicated conflict', conflicted([crossedConflict, crossedConflict])],
+    [
+      'a conflict on an applied field',
+      withTop({ conflicts: [{ ...crossedConflict, serverValue: true }] }),
+    ],
+    [
+      'a submitted field that is neither applied nor conflicted and still differs, on an unchanged revision',
+      withItem(
+        { crossedOffAt: null, itemRevision: 14 },
+        { appliedFields: [], conflicts: [], itemRevision: 14 },
+      ),
+    ],
+    [
+      'a submitted field that is neither applied nor conflicted and still differs, on an advanced revision',
+      withItem({ crossedOffAt: null }, { appliedFields: [], conflicts: [] }),
+    ],
+  ];
+
+  it.each(invalidBodies)(
+    'keeps the edit queued, unchanged, and unsent dependents held on a 2xx with %s, then settles on a valid one',
+    async (_name, makeInvalid) => {
+      await db.items.put(rowOf('i1'));
+      await crossOff('i1');
+      await rename('i1', 'Renamed');
+      const [first] = await queued();
+      const before = await db.items.get('i1');
+      const valid = response(
+        first!.mutation.id,
+        rowOf('i1', {
+          crossedOffAt: '2026-01-02T00:00:00.000Z',
+          itemRevision: 15,
+        }),
+        { appliedFields: ['crossedOff'] },
+      );
+      const invalid = makeInvalid(valid);
+      const results: unknown[] = [
+        invalid,
+        invalid,
+        valid,
+        accepted(rowOf('i1', { name: 'Renamed', itemRevision: 16 }), {
+          appliedFields: ['name'],
+        }),
+      ];
+      let attempts = 0;
+      const { engine, request, sleep } = makeEngine(() => results.shift());
+      sleep.mockImplementation(async () => {
+        attempts += 1;
+        // Inspect the queue while the invalid responses are being retried.
+        if (attempts <= 2) {
+          const entries = await queued();
+          expect(entries).toHaveLength(2);
+          expect(entries[0]).toEqual({
+            seq: first!.seq,
+            mutation: first!.mutation,
+          });
+          expect(entries[1]!.mutation).toMatchObject({
+            baseItemRevision: 14,
+            changes: { name: 'Renamed' },
+          });
+          expect(writes(request)).toHaveLength(attempts);
+          expect(await db.items.get('i1')).toEqual(before);
+          expect(await db.itemConflicts.count()).toBe(0);
+        }
+      });
+      await engine.flush();
+      const sent = bodies(request) as Array<{ mutationId: string }>;
+      expect(sent).toHaveLength(4);
+      expect(sent[1]).toEqual(sent[0]);
+      expect(sent[2]).toEqual(sent[0]);
+      expect(sent[0]!.mutationId).toBe(first!.mutation.id);
+      expect(sent[3]).toMatchObject({
+        baseItemRevision: 15,
+        changes: { name: 'Renamed' },
+      });
+      expect(await db.outbox.count()).toBe(0);
+    },
+  );
+
+  it('keeps an unconfirmed update unblocked and unsettled when the engine stops retrying', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const { engine, onError, sleep } = makeEngine(() => undefined);
+    sleep.mockImplementation(async () => engine.stop());
+    await engine.flush();
+    expect(onError).not.toHaveBeenCalled();
+    expect(await queued()).toMatchObject([
+      { mutation: { kind: 'updateItem', changes: { crossedOff: true } } },
+    ]);
+    expect((await queued())[0]!.blocked).toBeUndefined();
+    expect(await db.itemConflicts.count()).toBe(0);
+    expect(await db.items.get('i1')).toMatchObject({ itemRevision: 14 });
+  });
+
+  it('pauses on 401 without blocking the edit', async () => {
+    await db.items.put(rowOf('i1'));
+    await crossOff('i1');
+    const { engine, onAuthRequired } = makeEngine(() => new ApiError(401));
+    await engine.flush();
+    expect(onAuthRequired).toHaveBeenCalledTimes(1);
+    expect((await queued())[0]!.blocked).toBeUndefined();
   });
 });

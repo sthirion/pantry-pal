@@ -1,6 +1,6 @@
 import type {
+  ItemMutationResponse,
   ListItem,
-  OutboxMutation,
   ShoppingList,
   SyncResponse,
 } from '@pantry-pal/shared';
@@ -12,15 +12,22 @@ import {
   requestPersistentStorage,
   setMeta,
 } from './db';
+import { isItemMutationResponse, parseRejection } from './itemRecovery';
 import {
   backoffDelayMs,
   classifyStatus,
   type FailureAction,
-  peekOldest,
+  nextSendable,
   pendingTargets,
+  rebaseNextUnsentEdit,
   remapPendingIds,
   removeEntry,
 } from './outbox';
+import type {
+  OutboxEntry,
+  QueuedMutation,
+  UpdateItemMutation,
+} from './outbox.types';
 import { clearAuthRequired, reportDropped, requireAuth } from './syncNotices';
 
 interface WriteResponse {
@@ -28,6 +35,14 @@ interface WriteResponse {
   item?: ListItem;
   applied?: boolean;
   mergedFromId?: string;
+}
+
+type SendOutcome = 'sent' | 'blocked' | FailureAction;
+
+interface SendResult {
+  outcome: SendOutcome;
+  response?: WriteResponse | ItemMutationResponse;
+  rejection?: ReturnType<typeof parseRejection>;
 }
 
 export interface SyncEngineDeps {
@@ -55,7 +70,7 @@ const defaultDeps: SyncEngineDeps = {
 
 const enc = encodeURIComponent;
 
-function toRequest(m: OutboxMutation): {
+function toRequest(m: QueuedMutation): {
   path: string;
   init: { method: string; body?: unknown };
 } {
@@ -74,6 +89,18 @@ function toRequest(m: OutboxMutation): {
       return {
         path: `/api/lists/${enc(m.listId)}/items/${enc(m.itemId)}`,
         init: { method: 'PUT', body: m.body },
+      };
+    case 'updateItem':
+      return {
+        path: `/api/lists/${enc(m.listId)}/items/${enc(m.itemId)}`,
+        init: {
+          method: 'PUT',
+          body: {
+            mutationId: m.id,
+            baseItemRevision: m.baseItemRevision,
+            changes: m.changes,
+          },
+        },
       };
     case 'deleteItem':
       return {
@@ -169,14 +196,11 @@ export class SyncEngine {
   }
 
   private async onChanged(data: string): Promise<void> {
-    let version: unknown;
-    try {
-      version = (JSON.parse(data) as { version?: unknown }).version;
-    } catch {
-      return;
-    }
+    // The server sends the bare write version as the event data (e.g. `42`).
+    if (!/^\d+$/.test(data)) return;
+    const version = Number(data);
     const cursor = (await getMeta<number>('cursor')) ?? 0;
-    if (typeof version === 'number' && version > cursor) await this.pull();
+    if (version > cursor) await this.pull();
   }
 
   /**
@@ -203,17 +227,33 @@ export class SyncEngine {
     let attempt = 0;
     try {
       while (!this.paused) {
-        const entry = await peekOldest();
+        const entry = await nextSendable();
         if (!entry) return;
-        const { outcome, response } = await this.send(entry.mutation);
+        const { outcome, response, rejection } = await this.send(
+          entry.mutation,
+        );
         if (outcome === 'sent') {
           attempt = 0;
-          await removeEntry(entry.seq);
-          await this.applyWriteResult(entry.mutation, response);
+          if (entry.mutation.kind === 'updateItem') {
+            await this.settleUpdate(
+              entry,
+              entry.mutation,
+              response as ItemMutationResponse,
+            );
+          } else {
+            await removeEntry(entry.seq);
+            await this.applyWriteResult(
+              entry.mutation,
+              response as WriteResponse | undefined,
+            );
+          }
         } else if (outcome === 'retry') {
           await this.deps.sleep(backoffDelayMs(attempt));
           if (this.stopRequested) return;
           attempt += 1;
+        } else if (outcome === 'blocked' && rejection) {
+          attempt = 0;
+          await this.blockUpdate(entry, rejection);
         } else if (outcome === 'drop') {
           attempt = 0;
           await removeEntry(entry.seq);
@@ -227,16 +267,19 @@ export class SyncEngine {
     }
   }
 
-  private async send(mutation: OutboxMutation): Promise<{
-    outcome: 'sent' | FailureAction;
-    response?: WriteResponse;
-  }> {
+  private async send(mutation: QueuedMutation): Promise<SendResult> {
     const { path, init } = toRequest(mutation);
     try {
-      const response = await this.deps.request<WriteResponse | undefined>(
-        path,
-        init,
-      );
+      const response = await this.deps.request<
+        WriteResponse | ItemMutationResponse | undefined
+      >(path, init);
+      // An empty or malformed 2xx cannot confirm the edit; retry the same mutation id and payload.
+      if (
+        mutation.kind === 'updateItem' &&
+        !isItemMutationResponse(response, mutation)
+      ) {
+        return { outcome: 'retry' };
+      }
       return { outcome: 'sent', response };
     } catch (error) {
       if (!(error instanceof ApiError)) return { outcome: 'retry' }; // network error
@@ -245,15 +288,65 @@ export class SyncEngine {
         this.paused = true;
         this.deps.onAuthRequired();
       } else if (action === 'drop') {
+        if (mutation.kind === 'updateItem') {
+          // The patch stays queued for reconciliation instead of being dropped.
+          return {
+            outcome: 'blocked',
+            rejection: parseRejection(error.status, error.body),
+          };
+        }
         this.deps.onError(error.status);
       }
       return { outcome: action };
     }
   }
 
+  /**
+   * An accepted edit leaves the queue; its response rebases the item's next unsent edit and, when
+   * overlapping fields kept the server's value, records the attempted values for review.
+   * The household sync cursor is not moved: other members' changes may lie between it and `version`.
+   */
+  private async settleUpdate(
+    entry: OutboxEntry,
+    mutation: UpdateItemMutation,
+    response: ItemMutationResponse,
+  ): Promise<void> {
+    await db.transaction(
+      'rw',
+      [db.items, db.outbox, db.itemConflicts],
+      async () => {
+        await db.outbox.delete(entry.seq);
+        await rebaseNextUnsentEdit(mutation.itemId, response.itemRevision);
+        if (response.conflicts.length > 0) {
+          await db.itemConflicts.put({
+            mutationId: mutation.id,
+            listId: mutation.listId,
+            itemId: mutation.itemId,
+            conflicts: response.conflicts,
+            recordedAt: new Date().toISOString(),
+          });
+        }
+        const pending = await pendingTargets();
+        if (!pending.has(response.item.id)) await db.items.put(response.item);
+      },
+    );
+  }
+
+  /** Keeps a rejected edit queued, marked blocked, and refreshes the item from the server. */
+  private async blockUpdate(
+    entry: OutboxEntry,
+    { blocked, item }: ReturnType<typeof parseRejection>,
+  ): Promise<void> {
+    await db.transaction('rw', [db.items, db.outbox], async () => {
+      await db.outbox.update(entry.seq, { blocked });
+      if (item) await db.items.put(item);
+    });
+    if (!item) await this.pull({ replace: true });
+  }
+
   /** Takes the server's authoritative row from a write response, unless newer changes are queued. */
   private async applyWriteResult(
-    mutation: OutboxMutation,
+    mutation: Exclude<QueuedMutation, UpdateItemMutation>,
     response: WriteResponse | undefined,
   ): Promise<void> {
     if (!response) return;

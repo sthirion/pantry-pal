@@ -143,6 +143,12 @@ export const listItem = sqliteTable(
     nameKey: text('name_key').notNull(),
     crossedOffAt: integer('crossed_off_at'),
     version: integer('version').notNull(),
+    /** Per-item merge revision, separate from the household-wide `version` sync cursor. */
+    itemRevision: integer('item_revision').notNull().default(1),
+    /** Greatest `itemRevision` whose journal entry was pruned; 0 while the history is complete. */
+    prunedThroughItemRevision: integer('pruned_through_item_revision')
+      .notNull()
+      .default(0),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
     deletedAt: integer('deleted_at'),
@@ -152,6 +158,50 @@ export const listItem = sqliteTable(
       .on(t.listId, t.nameKey)
       .where(sql`${t.deletedAt} IS NULL`),
     index('list_item_household_version_idx').on(t.householdId, t.version),
+  ],
+);
+
+/** One row per accepted item change: the fields it changed, ordered by `itemRevision`. */
+export const itemChange = sqliteTable(
+  'item_change',
+  {
+    itemId: text('item_id')
+      .notNull()
+      .references(() => listItem.id, { onDelete: 'cascade' }),
+    householdId: text('household_id').notNull(),
+    itemRevision: integer('item_revision').notNull(),
+    mutationId: text('mutation_id').notNull(),
+    /** JSON array of the changed field names. */
+    fields: text('fields').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.itemId, t.itemRevision] }),
+    index('item_change_created_at_idx').on(t.createdAt),
+  ],
+);
+
+/** Idempotency receipt of an accepted item mutation; lives as long as its item. */
+export const itemMutationReceipt = sqliteTable(
+  'item_mutation_receipt',
+  {
+    householdId: text('household_id').notNull(),
+    mutationId: text('mutation_id').notNull(),
+    itemId: text('item_id')
+      .notNull()
+      .references(() => listItem.id, { onDelete: 'cascade' }),
+    baseItemRevision: integer('base_item_revision').notNull(),
+    /** Canonical JSON of the normalized patch. */
+    changes: text('changes').notNull(),
+    /** JSON array of the fields the mutation applied. */
+    appliedFields: text('applied_fields').notNull(),
+    /** JSON array of `{ field, attemptedValue, serverValue }`. */
+    conflicts: text('conflicts').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.householdId, t.mutationId] }),
+    index('item_mutation_receipt_item_id_idx').on(t.itemId),
   ],
 );
 

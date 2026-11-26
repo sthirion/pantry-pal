@@ -1,7 +1,7 @@
 import { v7 as uuidv7 } from 'uuid';
-import type { ListItem, ShoppingList } from '@pantry-pal/shared';
+import type { ItemChanges, ListItem, ShoppingList } from '@pantry-pal/shared';
 import { db } from './db';
-import { enqueue } from './outbox';
+import { enqueue, hasQueuedCreate } from './outbox';
 
 /**
  * Local-first writes: each function updates the local store and appends to the
@@ -56,7 +56,52 @@ export async function removeList(listId: string): Promise<void> {
   });
 }
 
-/** Creates (no `itemId`), renames, crosses off, or restores an item; returns its id. */
+/**
+ * Applies changed fields to a server-known item locally and queues them as one mutation based on the
+ * row's `itemRevision`. Queues nothing for an empty patch. Call inside a transaction on items and outbox.
+ */
+export async function queueItemUpdate(
+  existing: ListItem,
+  changes: ItemChanges,
+): Promise<void> {
+  if (Object.keys(changes).length === 0) return;
+  const changedAt = now();
+  await db.items.put({
+    ...existing,
+    ...(changes.name !== undefined && { name: changes.name }),
+    ...(changes.crossedOff !== undefined && {
+      crossedOffAt: changes.crossedOff
+        ? (existing.crossedOffAt ?? changedAt)
+        : null,
+    }),
+    updatedAt: changedAt,
+  });
+  await enqueue({
+    id: uuidv7(),
+    kind: 'updateItem',
+    listId: existing.listId,
+    itemId: existing.id,
+    baseItemRevision: existing.itemRevision ?? 1,
+    changes,
+  });
+}
+
+function changedFields(
+  existing: ListItem,
+  fields: { name: string; crossedOff: boolean },
+): ItemChanges {
+  return {
+    ...(fields.name !== existing.name && { name: fields.name }),
+    ...(fields.crossedOff !== (existing.crossedOffAt !== null) && {
+      crossedOff: fields.crossedOff,
+    }),
+  };
+}
+
+/**
+ * Creates (no `itemId`), renames, crosses off, or restores an item; returns its id.
+ * An item the server already knows is queued as a changed-field patch; a new one as a full create.
+ */
 export async function saveItem(
   listId: string,
   fields: { name: string; crossedOff: boolean },
@@ -65,6 +110,14 @@ export async function saveItem(
   const changedAt = now();
   await db.transaction('rw', writeTables(), async () => {
     const existing = await db.items.get(itemId);
+    if (
+      existing &&
+      existing.deletedAt === null &&
+      !(await hasQueuedCreate(itemId))
+    ) {
+      await queueItemUpdate(existing, changedFields(existing, fields));
+      return;
+    }
     const row: ListItem = {
       id: itemId,
       listId,
@@ -73,6 +126,7 @@ export async function saveItem(
         ? (existing?.crossedOffAt ?? changedAt)
         : null,
       version: existing?.version ?? 0,
+      itemRevision: existing?.itemRevision ?? 1,
       updatedAt: changedAt,
       deletedAt: null,
     };

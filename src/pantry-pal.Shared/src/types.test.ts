@@ -68,6 +68,7 @@ describe('shared types', () => {
       name: 'n',
       crossedOffAt: null,
       version: 1,
+      itemRevision: 1,
       updatedAt: 'u',
       deletedAt: null,
     };

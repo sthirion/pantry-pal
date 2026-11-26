@@ -5,6 +5,9 @@ import type {
   ApiError,
   ApiErrorCode,
   ApiErrorDetail,
+  ItemMutationRejection,
+  ItemMutationRejectionCode,
+  ListItem,
 } from '@pantry-pal/shared';
 
 /** Thrown by the validation helpers; mapped to `400 validation_failed`. */
@@ -83,6 +86,35 @@ export function errorResponse(
 
 export function forbiddenResponse(c: Context): Response {
   return errorResponse(c, ERROR_ROWS[403]!);
+}
+
+const MUTATION_REJECTION_MESSAGES: Record<ItemMutationRejectionCode, string> = {
+  BASE_VERSION_EXPIRED:
+    'The base item revision is older than retained history.',
+  BASE_VERSION_AHEAD: 'The base item revision is newer than the item.',
+  MUTATION_ID_REUSED: 'The mutation id was already used for other content.',
+};
+
+/** `409` for a rejected item mutation: the stable code plus the authorized current item state. */
+export function mutationRejectionResponse(
+  c: Context,
+  rejection: {
+    code: ItemMutationRejectionCode;
+    item: ListItem;
+    itemRevision: number;
+    version: number;
+  },
+): Response {
+  const body: ItemMutationRejection = {
+    error: {
+      code: rejection.code,
+      message: MUTATION_REJECTION_MESSAGES[rejection.code],
+    },
+    item: rejection.item,
+    itemRevision: rejection.itemRevision,
+    version: rejection.version,
+  };
+  return c.json(body, 409);
 }
 
 export function unauthenticatedResponse(c: Context): Response {

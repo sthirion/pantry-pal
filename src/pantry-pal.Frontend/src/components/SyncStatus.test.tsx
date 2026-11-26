@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SyncStatus } from './SyncStatus';
-import { clearAllStores } from '../services/db';
+import { clearAllStores, db } from '../services/db';
 import { saveList } from '../services/mutations';
 import {
   reportDropped,
@@ -59,6 +59,21 @@ describe('SyncStatus', () => {
     });
 
     expect(await screen.findByText('1 change waiting to sync')).toBeVisible();
+  });
+
+  it('tells the user how many changes need review', async () => {
+    await db.itemConflicts.put({
+      mutationId: 'm1',
+      listId: 'l1',
+      itemId: 'i1',
+      conflicts: [
+        { field: 'name', attemptedValue: 'Mine', serverValue: 'Theirs' },
+      ],
+      recordedAt: '2026-01-01T00:00:00.000Z',
+    });
+    renderStatus();
+
+    expect(await screen.findByText(/1 change needs your review/)).toBeVisible();
   });
 
   it('asks the user to sign in after a 401 and links to the sign-in screen', () => {

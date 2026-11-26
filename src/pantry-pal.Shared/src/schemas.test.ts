@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   changedAtSchema,
   deleteItemsBodySchema,
+  itemChangesSchema,
+  itemMutationBodySchema,
   putItemBodySchema,
   putListBodySchema,
   sinceQuerySchema,
@@ -92,6 +94,214 @@ describe('putItemBodySchema', () => {
       expect(failingPath(result)).toEqual(['crossedOff']);
     },
   );
+});
+
+describe('itemChangesSchema', () => {
+  it('accepts a name-only, a crossedOff-only and a two-field patch', () => {
+    expect(itemChangesSchema.parse({ name: 'Milk' })).toEqual({ name: 'Milk' });
+    expect(itemChangesSchema.parse({ crossedOff: false })).toEqual({
+      crossedOff: false,
+    });
+    expect(itemChangesSchema.parse({ name: 'Milk', crossedOff: true })).toEqual(
+      { name: 'Milk', crossedOff: true },
+    );
+  });
+
+  it('outputs the displayName form of the name', () => {
+    expect(itemChangesSchema.parse({ name: ' Whole   milk ' }).name).toBe(
+      'Whole milk',
+    );
+  });
+
+  it('accepts a name of 1 and 200 characters', () => {
+    expect(itemChangesSchema.safeParse({ name: 'a' }).success).toBe(true);
+    expect(itemChangesSchema.safeParse({ name: 'a'.repeat(200) }).success).toBe(
+      true,
+    );
+  });
+
+  it.each(['', '   ', 'a'.repeat(201)])('rejects name %j', (name) => {
+    const result = itemChangesSchema.safeParse({ name });
+    expect(failingPath(result)).toEqual(['name']);
+  });
+
+  it('reports the length message for a too-long name', () => {
+    const result = itemChangesSchema.safeParse({ name: 'a'.repeat(201) });
+    expect(result.error?.issues[0]?.message).toBe(
+      'Must be 1 to 200 characters.',
+    );
+  });
+
+  it.each(['true', 1, 0, null])('rejects crossedOff %j', (crossedOff) => {
+    const result = itemChangesSchema.safeParse({ crossedOff });
+    expect(failingPath(result)).toEqual(['crossedOff']);
+  });
+
+  it('rejects a name that is not a string', () => {
+    const result = itemChangesSchema.safeParse({ name: 5 });
+    expect(failingPath(result)).toEqual(['name']);
+  });
+
+  it('rejects a null name', () => {
+    const result = itemChangesSchema.safeParse({ name: null });
+    expect(failingPath(result)).toEqual(['name']);
+  });
+
+  it('measures the name length after normalization', () => {
+    const padded = `  ${'a'.repeat(200)}  `;
+    const spaced = `${'a'.repeat(100)}     ${'a'.repeat(100)}`;
+
+    expect(itemChangesSchema.parse({ name: padded }).name).toBe(
+      'a'.repeat(200),
+    );
+    expect(itemChangesSchema.safeParse({ name: spaced }).success).toBe(false);
+  });
+
+  it('rejects an empty patch', () => {
+    const result = itemChangesSchema.safeParse({});
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toBe(
+      'Must change at least one field.',
+    );
+  });
+
+  it.each([
+    ['version', 5],
+    ['itemRevision', 2],
+    ['deletedAt', null],
+    ['listId', 'x'],
+    ['id', 'x'],
+  ])('rejects the unsupported field %s', (field, value) => {
+    const result = itemChangesSchema.safeParse({
+      crossedOff: true,
+      [field]: value,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.code).toBe('unrecognized_keys');
+  });
+
+  it('rejects a patch of only unsupported fields', () => {
+    expect(itemChangesSchema.safeParse({ version: 5 }).success).toBe(false);
+  });
+});
+
+describe('itemMutationBodySchema', () => {
+  const valid = {
+    mutationId: uuid,
+    baseItemRevision: 14,
+    changes: { crossedOff: true },
+  };
+
+  it('accepts a complete mutation and keeps only the patch fields', () => {
+    expect(itemMutationBodySchema.parse(valid)).toEqual(valid);
+  });
+
+  it('normalizes the patch name', () => {
+    const parsed = itemMutationBodySchema.parse({
+      ...valid,
+      changes: { name: ' Granny   Smith ' },
+    });
+    expect(parsed.changes).toEqual({ name: 'Granny Smith' });
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['not a UUID', 'abc'],
+    ['empty', ''],
+    ['a number', 7],
+  ])('rejects a mutationId that is %s', (_label, mutationId) => {
+    const result = itemMutationBodySchema.safeParse({ ...valid, mutationId });
+    expect(failingPath(result)).toEqual(['mutationId']);
+  });
+
+  it.each([1, 2, Number.MAX_SAFE_INTEGER])(
+    'accepts baseItemRevision %i',
+    (baseItemRevision) => {
+      expect(
+        itemMutationBodySchema.safeParse({ ...valid, baseItemRevision })
+          .success,
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['fractional', 1.5],
+    ['beyond the safe range', Number.MAX_SAFE_INTEGER + 1],
+    ['infinite', Infinity],
+    ['a numeric string', '5'],
+    ['null', null],
+    ['missing', undefined],
+  ])('rejects a baseItemRevision that is %s', (_label, baseItemRevision) => {
+    const result = itemMutationBodySchema.safeParse({
+      ...valid,
+      baseItemRevision,
+    });
+    expect(failingPath(result)).toEqual(['baseItemRevision']);
+  });
+
+  it('rejects a missing changes object', () => {
+    const result = itemMutationBodySchema.safeParse({
+      mutationId: uuid,
+      baseItemRevision: 1,
+    });
+    expect(failingPath(result)).toEqual(['changes']);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', []],
+    ['a string', 'crossedOff'],
+  ])('rejects changes that is %s', (_label, changes) => {
+    const result = itemMutationBodySchema.safeParse({ ...valid, changes });
+    expect(failingPath(result)).toEqual(['changes']);
+  });
+
+  it.each([null, 'body', 5, []])('rejects a body of %j', (body) => {
+    expect(itemMutationBodySchema.safeParse(body).success).toBe(false);
+  });
+
+  it('rejects an empty patch at the changes path', () => {
+    const result = itemMutationBodySchema.safeParse({ ...valid, changes: {} });
+    expect(failingPath(result)).toEqual(['changes']);
+  });
+
+  it('rejects an unsupported patch field at the changes path', () => {
+    const result = itemMutationBodySchema.safeParse({
+      ...valid,
+      changes: { crossedOff: true, version: 9 },
+    });
+    expect(failingPath(result)).toEqual(['changes']);
+  });
+
+  it('rejects an invalid crossedOff and name length inside the patch', () => {
+    expect(
+      failingPath(
+        itemMutationBodySchema.safeParse({
+          ...valid,
+          changes: { crossedOff: 'yes' },
+        }),
+      ),
+    ).toEqual(['changes.crossedOff']);
+    expect(
+      failingPath(
+        itemMutationBodySchema.safeParse({
+          ...valid,
+          changes: { name: 'a'.repeat(201) },
+        }),
+      ),
+    ).toEqual(['changes.name']);
+  });
+
+  it('rejects an unknown top-level property', () => {
+    const result = itemMutationBodySchema.safeParse({
+      ...valid,
+      householdId: 'other',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.code).toBe('unrecognized_keys');
+  });
 });
 
 describe('deleteItemsBodySchema', () => {

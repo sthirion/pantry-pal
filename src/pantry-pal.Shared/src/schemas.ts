@@ -27,6 +27,22 @@ export const putItemBodySchema = z.object({
   changedAt: changedAtSchema,
 });
 
+/** Changed-field patch of an item mutation: only allowlisted fields, at least one. */
+export const itemChangesSchema = z
+  .strictObject({
+    name: boundedName(200).optional(),
+    crossedOff: z.boolean().optional(),
+  })
+  .refine((changes) => Object.keys(changes).length > 0, {
+    message: 'Must change at least one field.',
+  });
+
+export const itemMutationBodySchema = z.strictObject({
+  mutationId: uuidSchema,
+  baseItemRevision: z.int().positive(),
+  changes: itemChangesSchema,
+});
+
 export const deleteItemsBodySchema = z.object({
   itemIds: z.array(uuidSchema).min(1).max(500),
   changedAt: changedAtSchema,

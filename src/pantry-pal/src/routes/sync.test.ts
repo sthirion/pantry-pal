@@ -161,6 +161,7 @@ describe('GET /api/sync', () => {
           name: 'milk',
           crossedOffAt: null,
           version: 5,
+          itemRevision: 1,
           updatedAt: new Date(2000).toISOString(),
           deletedAt: new Date(2000).toISOString(),
         },

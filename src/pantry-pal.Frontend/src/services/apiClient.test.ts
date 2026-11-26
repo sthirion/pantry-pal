@@ -39,4 +39,24 @@ describe('apiRequest', () => {
     await expect(apiRequest('/api/x')).rejects.toEqual(expect.any(ApiError));
     await expect(apiRequest('/api/x')).rejects.toMatchObject({ status: 429 });
   });
+
+  it('carries the parsed JSON body of a failed response', async () => {
+    stubFetch(
+      new Response('{"error":{"code":"BASE_VERSION_EXPIRED"}}', {
+        status: 409,
+      }),
+    );
+    await expect(apiRequest('/api/x')).rejects.toMatchObject({
+      status: 409,
+      body: { error: { code: 'BASE_VERSION_EXPIRED' } },
+    });
+  });
+
+  it('leaves the body undefined when a failed response is not JSON', async () => {
+    stubFetch(new Response('<html>', { status: 502 }));
+    await expect(apiRequest('/api/x')).rejects.toMatchObject({
+      status: 502,
+      body: undefined,
+    });
+  });
 });

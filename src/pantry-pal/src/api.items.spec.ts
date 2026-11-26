@@ -2,15 +2,18 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { nameKey } from '@pantry-pal/shared';
 import { createHousehold, createUser } from './admin-commands.js';
-import { ORIGIN, useHarness } from './api.harness.js';
+import { ORIGIN, useHarness, type TracedQuery } from './api.harness.js';
 import {
   changeCounter,
   householdMember,
+  itemChange,
+  itemMutationReceipt,
   itemSuggestion,
   listItem,
   shoppingList,
 } from './db/schema.js';
 import { HouseholdEventHub } from './realtime/household-event-hub.js';
+import { MaintenanceService } from './services/maintenance-service.js';
 
 const PASSWORD = 'correct horse';
 const FORBIDDEN = '{"error":{"code":"forbidden","message":"Forbidden."}}';
@@ -41,6 +44,8 @@ const listId = (n: number) =>
   `0192f0c2-0000-7000-8000-${n.toString(16).padStart(12, '0')}`;
 const itemId = (n: number) =>
   `0192f0c3-0000-7000-8000-${n.toString(16).padStart(12, '0')}`;
+const mid = (n: number) =>
+  `0192f0c4-0000-7000-8000-${n.toString(16).padStart(12, '0')}`;
 
 const LIST_ID = listId(0x0a);
 const LIST_2 = listId(0x0b);
@@ -92,6 +97,7 @@ function itemJson(o: {
   name: string;
   crossedOffAt?: number | null;
   version: number;
+  itemRevision?: number;
   updatedAt: number;
   deletedAt?: number | null;
 }) {
@@ -101,6 +107,7 @@ function itemJson(o: {
     name: o.name,
     crossedOffAt: o.crossedOffAt == null ? null : iso(o.crossedOffAt),
     version: o.version,
+    itemRevision: o.itemRevision ?? 1,
     updatedAt: iso(o.updatedAt),
     deletedAt: o.deletedAt == null ? null : iso(o.deletedAt),
   };
@@ -115,6 +122,7 @@ function projection(r: ItemRow) {
     name: r.name,
     crossedOffAt: r.crossedOffAt,
     version: r.version,
+    itemRevision: r.itemRevision,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
   });
@@ -129,6 +137,35 @@ const putBody = (o: Record<string, unknown> = {}) => ({
 
 const putBodyWithout = (key: string) =>
   Object.fromEntries(Object.entries(putBody()).filter(([k]) => k !== key));
+
+const mutationBody = (o: Record<string, unknown> = {}) => ({
+  mutationId: mid(1),
+  baseItemRevision: 1,
+  changes: { crossedOff: true },
+  ...o,
+});
+
+const mutationBodyWithout = (key: string) =>
+  Object.fromEntries(Object.entries(mutationBody()).filter(([k]) => k !== key));
+
+function accepted(o: {
+  mutationId: string;
+  item: ReturnType<typeof itemJson>;
+  version: number;
+  appliedFields: string[];
+  conflicts?: unknown[];
+  replayed?: boolean;
+}) {
+  return {
+    mutationId: o.mutationId,
+    item: o.item,
+    itemRevision: o.item.itemRevision,
+    version: o.version,
+    appliedFields: o.appliedFields,
+    conflicts: o.conflicts ?? [],
+    replayed: o.replayed ?? false,
+  };
+}
 
 const batchBody = (o: Record<string, unknown> = {}) => ({
   itemIds: [ITEM_1],
@@ -549,6 +586,7 @@ describe('Items API', () => {
           name: 'Ice cream',
           crossedOffAt: NEWER_MS,
           version: v + 1,
+          itemRevision: 2,
           updatedAt: NEWER_MS,
         }),
         applied: true,
@@ -576,6 +614,7 @@ describe('Items API', () => {
           name: 'Ice cream',
           crossedOffAt: null,
           version: v + 1,
+          itemRevision: 2,
           updatedAt: NEWER_MS,
         }),
         applied: true,
@@ -1007,6 +1046,7 @@ describe('Items API', () => {
           name: 'milk',
           crossedOffAt: null,
           version: v + 1,
+          itemRevision: 2,
           updatedAt: NEWER_MS,
         }),
         applied: true,
@@ -1543,6 +1583,1726 @@ describe('Items API', () => {
       expect(itemRow(ITEM_1)?.deletedAt).toBe(STORED);
       expect(snapshot()).toEqual(before);
       expect(events).toEqual([]);
+    });
+  });
+
+  describe('PUT item mutation', () => {
+    const mutate = (
+      body: unknown,
+      o: Send = {},
+      list = LIST_ID,
+      item = ITEM_1,
+    ) => putItem(list, item, body, o);
+
+    const cursor = (householdId: string) => {
+      const { lists, items } = snapshot();
+      return Math.max(
+        0,
+        ...lists
+          .filter((l) => l.householdId === householdId)
+          .map((l) => l.version),
+        ...items
+          .filter((i) => i.householdId === householdId)
+          .map((i) => i.version),
+      );
+    };
+
+    const journalOf = (id: string) =>
+      ctx.h.db
+        .select()
+        .from(itemChange)
+        .where(eq(itemChange.itemId, id))
+        .all()
+        .sort((a, b) => a.itemRevision - b.itemRevision);
+
+    const receipts = () =>
+      ctx.h.db
+        .select()
+        .from(itemMutationReceipt)
+        .all()
+        .sort((a, b) =>
+          `${a.householdId}|${a.mutationId}`.localeCompare(
+            `${b.householdId}|${b.mutationId}`,
+          ),
+        );
+
+    /** Everything a mutation may touch: rows, counter, suggestions, journal and receipts. */
+    const mutationState = () => ({
+      ...snapshot(),
+      journal: ctx.h.db
+        .select()
+        .from(itemChange)
+        .all()
+        .sort((a, b) =>
+          `${a.itemId}|${String(a.itemRevision).padStart(9, '0')}`.localeCompare(
+            `${b.itemId}|${String(b.itemRevision).padStart(9, '0')}`,
+          ),
+        ),
+      receipts: receipts(),
+    });
+
+    function seedRevised(
+      o: Parameters<typeof seedItem>[0] & {
+        itemRevision: number;
+        prunedThrough?: number;
+      },
+    ) {
+      const { itemRevision, prunedThrough, ...row } = o;
+      seedItem(row);
+      ctx.h.db
+        .update(listItem)
+        .set({
+          itemRevision,
+          ...(prunedThrough !== undefined && {
+            prunedThroughItemRevision: prunedThrough,
+          }),
+        })
+        .where(eq(listItem.id, o.id))
+        .run();
+    }
+
+    function seedJournal(id: string, itemRevision: number, fields: string[]) {
+      ctx.h.db
+        .insert(itemChange)
+        .values({
+          itemId: id,
+          householdId: h1,
+          itemRevision,
+          mutationId: mid(0x100 + itemRevision),
+          fields: JSON.stringify(fields),
+          createdAt: STORED,
+        })
+        .run();
+    }
+
+    const journalRow = (
+      id: string,
+      itemRevision: number,
+      mutationId: string,
+      fields: string[],
+      createdAt = NOW,
+    ) => ({
+      itemId: id,
+      householdId: h1,
+      itemRevision,
+      mutationId,
+      fields: JSON.stringify(fields),
+      createdAt,
+    });
+
+    function rejection(code: string, id: string) {
+      const row = itemRow(id)!;
+      return {
+        error: { code, message: expect.any(String) },
+        item: projection(row),
+        itemRevision: row.itemRevision,
+        version: cursor(row.householdId),
+      };
+    }
+
+    describe('merge', () => {
+      it('PUT item mutation with a disjoint change after another member renamed preserves both changes', async () => {
+        // Given Sam and Alex at itemRevision 14 and a subscriber
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        const events = watch(h1);
+        const events2 = watch(h2);
+        const v = counter();
+
+        // When Alex renames online and Sam then submits a crossedOff change based on 14
+        const alex = await mutate(
+          mutationBody({
+            mutationId: mid(1),
+            baseItemRevision: 14,
+            changes: { name: 'Granny Smith apples' },
+          }),
+          { as: 'a2' },
+        );
+        const sam = await mutate(
+          mutationBody({ mutationId: mid(2), baseItemRevision: 14 }),
+        );
+
+        // Then Sam's change is applied to the current item and Alex's name is kept
+        expect(alex.status).toBe(200);
+        expect(sam.status).toBe(200);
+        expect(sam.headers.get('content-type')).toContain('application/json');
+        expect(await sam.json()).toEqual(
+          accepted({
+            mutationId: mid(2),
+            item: itemJson({
+              id: ITEM_1,
+              name: 'Granny Smith apples',
+              crossedOffAt: NOW,
+              version: v + 2,
+              itemRevision: 16,
+              updatedAt: NOW,
+            }),
+            version: v + 2,
+            appliedFields: ['crossedOff'],
+          }),
+        );
+        expect(itemRow(ITEM_1)).toMatchObject({
+          name: 'Granny Smith apples',
+          crossedOffAt: NOW,
+          itemRevision: 16,
+          version: v + 2,
+        });
+        expect(events).toEqual([v + 1, v + 2]);
+        expect(events2).toEqual([]);
+      });
+
+      it('PUT item mutation journaling only name changes after the base applies crossedOff and records journal and receipt', async () => {
+        // Given an item at itemRevision 3 whose journal holds only name changes after base 1
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 3 });
+        seedJournal(ITEM_1, 2, ['name']);
+        seedJournal(ITEM_1, 3, ['name']);
+        const events = watch(h1);
+        const v = counter();
+
+        // When a crossedOff change based on 1 is submitted
+        const res = await mutate(mutationBody({ baseItemRevision: 1 }));
+
+        // Then itemRevision advances once and the shared counter advances once
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual(
+          accepted({
+            mutationId: mid(1),
+            item: itemJson({
+              id: ITEM_1,
+              name: 'Apples',
+              crossedOffAt: NOW,
+              version: v + 1,
+              itemRevision: 4,
+              updatedAt: NOW,
+            }),
+            version: v + 1,
+            appliedFields: ['crossedOff'],
+          }),
+        );
+        expect(counter()).toBe(v + 1);
+        expect(events).toEqual([v + 1]);
+        expect(journalOf(ITEM_1)).toEqual([
+          journalRow(ITEM_1, 2, mid(0x102), ['name'], STORED),
+          journalRow(ITEM_1, 3, mid(0x103), ['name'], STORED),
+          journalRow(ITEM_1, 4, mid(1), ['crossedOff']),
+        ]);
+        expect(receipts()).toEqual([
+          {
+            householdId: h1,
+            mutationId: mid(1),
+            itemId: ITEM_1,
+            baseItemRevision: 1,
+            changes: '{"crossedOff":true}',
+            appliedFields: '["crossedOff"]',
+            conflicts: '[]',
+            createdAt: NOW,
+          },
+        ]);
+      });
+
+      it('PUT item mutation renaming after another member crossed off preserves both changes', async () => {
+        // Given Alex crossed the item off after Sam's base 14
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        const alex = await mutate(
+          mutationBody({ mutationId: mid(1), baseItemRevision: 14 }),
+          { as: 'a2' },
+        );
+        expect(alex.status).toBe(200);
+
+        // When Sam submits a rename based on 14
+        const res = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: 14,
+            changes: { name: 'Granny Smith apples' },
+          }),
+        );
+
+        // Then the rename applies and the crossed-off state is kept
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).toMatchObject({
+          itemRevision: 16,
+          appliedFields: ['name'],
+          conflicts: [],
+        });
+        expect(itemRow(ITEM_1)).toMatchObject({
+          name: 'Granny Smith apples',
+          crossedOffAt: NOW,
+        });
+      });
+
+      it('PUT item mutation renaming normalizes the name and records the suggestion', async () => {
+        // Given an item "milk"
+        seedRevised({ id: ITEM_1, name: 'milk', itemRevision: 1 });
+
+        // When it is renamed with an unnormalized name
+        const res = await mutate(
+          mutationBody({ changes: { name: '  Oat   milk ' } }),
+        );
+
+        // Then the display name and key are stored normalized
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.appliedFields).toEqual(['name']);
+        expect(body.item.name).toBe('Oat milk');
+        expect(itemRow(ITEM_1)).toMatchObject({
+          name: 'Oat milk',
+          nameKey: 'oat milk',
+        });
+        expect(suggestion(h1, 'oat milk')).toMatchObject({
+          name: 'Oat milk',
+          useCount: 1,
+        });
+      });
+
+      it('PUT item mutation changing name and crossedOff together applies both fields', async () => {
+        // Given an active item
+        seedRevised({ id: ITEM_1, name: 'milk', itemRevision: 1 });
+
+        // When both fields change in one patch
+        const res = await mutate(
+          mutationBody({ changes: { name: 'Oat milk', crossedOff: true } }),
+        );
+
+        // Then both are applied under one revision and one journal entry
+        expect(res.status).toBe(200);
+        expect((await res.json()).appliedFields).toEqual([
+          'name',
+          'crossedOff',
+        ]);
+        expect(itemRow(ITEM_1)).toMatchObject({
+          name: 'Oat milk',
+          crossedOffAt: NOW,
+          itemRevision: 2,
+        });
+        expect(journalOf(ITEM_1)).toEqual([
+          journalRow(ITEM_1, 2, mid(1), ['name', 'crossedOff']),
+        ]);
+      });
+
+      it('PUT item mutation uncrossing a crossed-off item clears crossedOffAt', async () => {
+        // Given a crossed-off item
+        seedRevised({
+          id: ITEM_1,
+          name: 'milk',
+          crossedOffAt: STORED,
+          itemRevision: 1,
+        });
+
+        // When it is restored
+        const res = await mutate(
+          mutationBody({ changes: { crossedOff: false } }),
+        );
+
+        // Then crossedOffAt is null
+        expect(res.status).toBe(200);
+        expect((await res.json()).item.crossedOffAt).toBeNull();
+        expect(itemRow(ITEM_1)?.crossedOffAt).toBeNull();
+      });
+
+      it('PUT item mutation chained on the returned itemRevision applies in order', async () => {
+        // Given an item and a first accepted mutation
+        seedRevised({ id: ITEM_1, name: 'milk', itemRevision: 1 });
+        const first = await mutate(mutationBody({ mutationId: mid(1) }));
+        const { itemRevision } = await first.json();
+
+        // When the next edit uses the returned itemRevision as its base
+        const second = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: itemRevision,
+            changes: { name: 'Oat milk' },
+          }),
+        );
+
+        // Then it applies without conflict as the following revision
+        expect(second.status).toBe(200);
+        const body = await second.json();
+        expect(body).toMatchObject({
+          itemRevision: 3,
+          appliedFields: ['name'],
+          conflicts: [],
+          replayed: false,
+        });
+        expect(journalOf(ITEM_1).map((j) => j.itemRevision)).toEqual([2, 3]);
+      });
+
+      it('PUT item mutation renaming to the name of another live item returns 409 name_taken and persists nothing', async () => {
+        // Given two live items
+        seedRevised({ id: ITEM_1, name: 'milk', itemRevision: 1 });
+        seedRevised({ id: ITEM_2, name: 'bread', itemRevision: 1 });
+        const events = watch(h1);
+        const before = mutationState();
+
+        // When bread is renamed to the other's name
+        const res = await mutate(
+          mutationBody({ changes: { name: 'MILK' } }),
+          {},
+          LIST_ID,
+          ITEM_2,
+        );
+
+        // Then name_taken is returned without row, journal or receipt changes
+        expect(res.status).toBe(409);
+        expect(await res.text()).toBe(NAME_TAKEN);
+        expect(mutationState()).toEqual(before);
+        expect(events).toEqual([]);
+      });
+
+      it('PUT item mutation is returned by a sync request using the cursor from before it', async () => {
+        // Given an item at itemRevision 14 and the household cursor before the mutation
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        const before = cursor(h1);
+
+        // When a mutation is accepted and the household syncs from the earlier cursor
+        const res = await mutate(mutationBody({ baseItemRevision: 14 }));
+        const body = await res.json();
+        const since = await (
+          await call('GET', `/api/sync?since=${before}`)
+        ).json();
+        const later = await (
+          await call('GET', `/api/sync?since=${body.version}`)
+        ).json();
+
+        // Then the sync delta carries the item and its revision, and the returned version is the new cursor
+        expect(res.status).toBe(200);
+        expect(body.itemRevision).toBe(15);
+        expect(since.version).toBe(body.version);
+        expect(since.items).toEqual([body.item]);
+        expect(later.items).toEqual([]);
+      });
+    });
+
+    describe('same-field conflicts', () => {
+      const alexRenames = (name = 'Online name') =>
+        mutate(
+          mutationBody({
+            mutationId: mid(1),
+            baseItemRevision: 14,
+            changes: { name },
+          }),
+          { as: 'a2' },
+        );
+
+      it('PUT item mutation changing name and crossedOff after a rename keeps the server name, applies crossedOff and reports the conflict', async () => {
+        // Given Alex renamed the item after Sam's base 14
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        expect((await alexRenames()).status).toBe(200);
+        const v = counter();
+
+        // When Sam replays an offline name and crossedOff change based on 14
+        const res = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: 14,
+            changes: { name: '  Offline   name ', crossedOff: true },
+          }),
+        );
+
+        // Then the server name wins, crossedOff applies and both values are reported
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual(
+          accepted({
+            mutationId: mid(2),
+            item: itemJson({
+              id: ITEM_1,
+              name: 'Online name',
+              crossedOffAt: NOW,
+              version: v + 1,
+              itemRevision: 16,
+              updatedAt: NOW,
+            }),
+            version: v + 1,
+            appliedFields: ['crossedOff'],
+            conflicts: [
+              {
+                field: 'name',
+                attemptedValue: 'Offline name',
+                serverValue: 'Online name',
+              },
+            ],
+          }),
+        );
+        expect(itemRow(ITEM_1)?.name).toBe('Online name');
+        expect(journalOf(ITEM_1).map((j) => j.fields)).toEqual([
+          '["name"]',
+          '["crossedOff"]',
+        ]);
+      });
+
+      it('PUT item mutation changing only a conflicting field returns 200 with no applied fields and advances nothing', async () => {
+        // Given Alex renamed the item after Sam's base 14 and a subscriber
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        expect((await alexRenames()).status).toBe(200);
+        const events = watch(h1);
+        const before = mutationState();
+
+        // When Sam submits only a name change based on 14
+        const res = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: 14,
+            changes: { name: 'Offline name' },
+          }),
+        );
+
+        // Then the conflict is reported and neither revision, cursor nor journal advances
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual(
+          accepted({
+            mutationId: mid(2),
+            item: projection(itemRow(ITEM_1)!),
+            version: cursor(h1),
+            appliedFields: [],
+            conflicts: [
+              {
+                field: 'name',
+                attemptedValue: 'Offline name',
+                serverValue: 'Online name',
+              },
+            ],
+          }),
+        );
+        const after = mutationState();
+        expect(after.items).toEqual(before.items);
+        expect(after.counter).toBe(before.counter);
+        expect(after.journal).toEqual(before.journal);
+        expect(events).toEqual([]);
+      });
+
+      it('PUT item mutation changing both fields after both changed reports both conflicts and advances nothing', async () => {
+        // Given Alex renamed and crossed the item off after Sam's base 14
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        const alex = await mutate(
+          mutationBody({
+            mutationId: mid(1),
+            baseItemRevision: 14,
+            changes: { name: 'Online name', crossedOff: true },
+          }),
+          { as: 'a2' },
+        );
+        expect(alex.status).toBe(200);
+        const events = watch(h1);
+        const before = mutationState();
+
+        // When Sam submits a rename and crossedOff false based on 14
+        const res = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: 14,
+            changes: { name: 'Offline name', crossedOff: false },
+          }),
+        );
+
+        // Then both attempted values are reported and neither revision, cursor nor journal advances
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.appliedFields).toEqual([]);
+        expect(body.conflicts).toEqual([
+          {
+            field: 'name',
+            attemptedValue: 'Offline name',
+            serverValue: 'Online name',
+          },
+          { field: 'crossedOff', attemptedValue: false, serverValue: true },
+        ]);
+        const after = mutationState();
+        expect(after.items).toEqual(before.items);
+        expect(after.counter).toBe(before.counter);
+        expect(after.journal).toEqual(before.journal);
+        expect(events).toEqual([]);
+      });
+
+      it('PUT item mutation uncrossing after another member crossed off reports a crossedOff conflict', async () => {
+        // Given Alex crossed the item off after Sam's base 14
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        const alex = await mutate(
+          mutationBody({ mutationId: mid(1), baseItemRevision: 14 }),
+          { as: 'a2' },
+        );
+        expect(alex.status).toBe(200);
+
+        // When Sam submits crossedOff false based on 14
+        const res = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: 14,
+            changes: { crossedOff: false },
+          }),
+        );
+
+        // Then the item stays crossed off and the attempted value is reported
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.appliedFields).toEqual([]);
+        expect(body.conflicts).toEqual([
+          { field: 'crossedOff', attemptedValue: false, serverValue: true },
+        ]);
+        expect(body.item.crossedOffAt).toBe(iso(NOW));
+        expect(itemRow(ITEM_1)?.crossedOffAt).toBe(NOW);
+      });
+
+      it('PUT item mutation after a legacy PUT rename reports the name conflict', async () => {
+        // Given a legacy PUT renamed the item after Sam's base 1
+        seedItem({ id: ITEM_1, name: 'Apples' });
+        const legacy = await putItem(
+          LIST_ID,
+          ITEM_1,
+          putBody({ name: 'Granny apples', changedAt: NEWER }),
+        );
+        expect(legacy.status).toBe(200);
+
+        // When Sam submits a name change based on 1
+        const res = await mutate(
+          mutationBody({ changes: { name: 'Offline name' } }),
+        );
+
+        // Then the journaled legacy change is detected
+        expect(res.status).toBe(200);
+        expect((await res.json()).conflicts).toEqual([
+          {
+            field: 'name',
+            attemptedValue: 'Offline name',
+            serverValue: 'Granny apples',
+          },
+        ]);
+        expect(itemRow(ITEM_1)?.name).toBe('Granny apples');
+      });
+
+      it('PUT item mutation replayed after a conflict returns the recorded conflicts with replayed true', async () => {
+        // Given a conflicting mutation that was answered
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        expect((await alexRenames()).status).toBe(200);
+        const body = mutationBody({
+          mutationId: mid(2),
+          baseItemRevision: 14,
+          changes: { name: 'Offline name' },
+        });
+        const first = await mutate(body);
+        const before = mutationState();
+
+        // When the identical mutation is retried
+        const res = await mutate(body);
+
+        // Then the same conflicts are returned as a replay without any change
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({
+          ...(await first.json()),
+          replayed: true,
+        });
+        expect(mutationState()).toEqual(before);
+      });
+    });
+
+    describe('no-op', () => {
+      it.each([
+        ['crossedOff already true', { crossedOff: true }],
+        ['a name equal after normalization', { name: '  Ice   cream ' }],
+      ])(
+        'PUT item mutation with %s returns 200 and advances nothing',
+        async (_label, changes) => {
+          // Given a crossed-off item "Ice cream" and a subscriber
+          seedRevised({
+            id: ITEM_1,
+            name: 'Ice cream',
+            crossedOffAt: STORED,
+            itemRevision: 1,
+          });
+          const events = watch(h1);
+          const before = mutationState();
+
+          // When a mutation that leaves the row unchanged is submitted
+          const res = await mutate(mutationBody({ changes }));
+
+          // Then the item, counter, journal and events are untouched but the receipt is recorded
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual(
+            accepted({
+              mutationId: mid(1),
+              item: projection(itemRow(ITEM_1)!),
+              version: cursor(h1),
+              appliedFields: [],
+            }),
+          );
+          const after = mutationState();
+          expect(after.items).toEqual(before.items);
+          expect(after.counter).toBe(before.counter);
+          expect(after.journal).toEqual(before.journal);
+          expect(after.receipts).toHaveLength(1);
+          expect(after.receipts[0]).toMatchObject({
+            mutationId: mid(1),
+            appliedFields: '[]',
+            conflicts: '[]',
+          });
+          expect(events).toEqual([]);
+        },
+      );
+
+      it('PUT item mutation retrying a no-op returns replayed true and still advances nothing', async () => {
+        // Given an accepted no-op
+        seedRevised({
+          id: ITEM_1,
+          name: 'Ice cream',
+          crossedOffAt: STORED,
+          itemRevision: 1,
+        });
+        const first = await mutate(mutationBody());
+        const before = mutationState();
+        const events = watch(h1);
+
+        // When it is retried
+        const res = await mutate(mutationBody());
+
+        // Then the stored outcome is replayed and nothing changes
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({
+          ...(await first.json()),
+          replayed: true,
+        });
+        expect(mutationState()).toEqual(before);
+        expect(events).toEqual([]);
+      });
+    });
+
+    describe('base revision', () => {
+      it('PUT item mutation with a base older than the pruned watermark returns 409 BASE_VERSION_EXPIRED and applies nothing', async () => {
+        // Given an item at itemRevision 20 pruned through 10 and a subscriber
+        seedRevised({
+          id: ITEM_1,
+          name: 'Apples',
+          itemRevision: 20,
+          prunedThrough: 10,
+        });
+        const events = watch(h1);
+        const before = mutationState();
+        const expected = rejection('BASE_VERSION_EXPIRED', ITEM_1);
+
+        // When a mutation based on 9 is submitted
+        const res = await mutate(mutationBody({ baseItemRevision: 9 }));
+
+        // Then the current item, itemRevision and cursor are returned and nothing is stored
+        expect(res.status).toBe(409);
+        expect(res.headers.get('content-type')).toContain('application/json');
+        expect(await res.json()).toEqual(expected);
+        expect(mutationState()).toEqual(before);
+        expect(events).toEqual([]);
+      });
+
+      it('PUT item mutation with a base equal to the pruned watermark is applied', async () => {
+        // Given an item at itemRevision 20 pruned through 10
+        seedRevised({
+          id: ITEM_1,
+          name: 'Apples',
+          itemRevision: 20,
+          prunedThrough: 10,
+        });
+
+        // When a mutation based on exactly 10 is submitted
+        const res = await mutate(mutationBody({ baseItemRevision: 10 }));
+
+        // Then the retained history is complete and the change is applied
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.appliedFields).toEqual(['crossedOff']);
+        expect(body.itemRevision).toBe(21);
+      });
+
+      it.each([
+        ['one above the item', 6],
+        ['the largest safe integer', Number.MAX_SAFE_INTEGER],
+      ])(
+        'PUT item mutation with a base %s returns 409 BASE_VERSION_AHEAD and applies nothing',
+        async (_label, baseItemRevision) => {
+          // Given an item at itemRevision 5 and a subscriber
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 5 });
+          const events = watch(h1);
+          const before = mutationState();
+          const expected = rejection('BASE_VERSION_AHEAD', ITEM_1);
+
+          // When a mutation based on a future revision is submitted
+          const res = await mutate(mutationBody({ baseItemRevision }));
+
+          // Then the current itemRevision and cursor are returned and nothing is stored
+          expect(res.status).toBe(409);
+          expect(await res.json()).toEqual(expected);
+          expect(mutationState()).toEqual(before);
+          expect(events).toEqual([]);
+        },
+      );
+
+      it('PUT item mutation with a base equal to the current itemRevision is applied', async () => {
+        // Given an item at itemRevision 5
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 5 });
+
+        // When a mutation based on 5 is submitted
+        const res = await mutate(mutationBody({ baseItemRevision: 5 }));
+
+        // Then it is applied as revision 6
+        expect(res.status).toBe(200);
+        expect((await res.json()).itemRevision).toBe(6);
+      });
+    });
+
+    describe('journal pruning', () => {
+      const HOUR = 60 * 60_000;
+
+      const seedAgedJournal = () => {
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 4 });
+        const aged: Array<[number, number]> = [
+          [2, NOW - 26 * HOUR],
+          [3, NOW - 25 * HOUR],
+          [4, NOW - 25 * HOUR + 1],
+        ];
+        for (const [revision, createdAt] of aged) {
+          ctx.h.db
+            .insert(itemChange)
+            .values(
+              journalRow(
+                ITEM_1,
+                revision,
+                mid(0x100 + revision),
+                ['name'],
+                createdAt,
+              ),
+            )
+            .run();
+        }
+      };
+
+      const prune = () =>
+        new MaintenanceService(ctx.h.db, () => NOW).pruneItemJournal();
+
+      it('PUT item mutation with a base below the watermark raised by the pruning task returns 409 BASE_VERSION_EXPIRED', async () => {
+        // Given entries 26 and 25 hours old were pruned and one 25 hours minus 1 ms old was kept
+        seedAgedJournal();
+        expect(prune()).toBe(2);
+        const before = mutationState();
+        const expected = rejection('BASE_VERSION_EXPIRED', ITEM_1);
+
+        // When a mutation based on 2 is submitted
+        const res = await mutate(mutationBody({ baseItemRevision: 2 }));
+
+        // Then it is expired, the entries newer than the cutoff survive and nothing is stored
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual(expected);
+        expect(itemRow(ITEM_1)?.prunedThroughItemRevision).toBe(3);
+        expect(journalOf(ITEM_1).map((j) => j.itemRevision)).toEqual([4]);
+        expect(mutationState()).toEqual(before);
+      });
+
+      it('PUT item mutation based on the watermark after pruning still detects a conflict in the retained entry', async () => {
+        // Given entries up to revision 3 were pruned and revision 4 changed the name
+        seedAgedJournal();
+        prune();
+
+        // When a name and crossedOff change based on 3 is submitted
+        const res = await mutate(
+          mutationBody({
+            baseItemRevision: 3,
+            changes: { name: 'Offline name', crossedOff: true },
+          }),
+        );
+
+        // Then the retained history is complete, so the name conflicts and crossedOff applies
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.appliedFields).toEqual(['crossedOff']);
+        expect(body.conflicts).toEqual([
+          {
+            field: 'name',
+            attemptedValue: 'Offline name',
+            serverValue: 'Apples',
+          },
+        ]);
+      });
+
+      describe('when the pruning transaction fails', () => {
+        const seedSecondItem = () => {
+          seedRevised({ id: ITEM_2, name: 'Pears', itemRevision: 2 });
+          ctx.h.db
+            .insert(itemChange)
+            .values(
+              journalRow(ITEM_2, 2, mid(0x202), ['name'], NOW - 30 * HOUR),
+            )
+            .run();
+        };
+
+        const abort = (name: string, event: string, when: string) =>
+          ctx.h.sqlite.exec(
+            `CREATE TRIGGER ${name} BEFORE ${event} WHEN ${when}
+             BEGIN SELECT RAISE(ABORT, 'secret-trigger-detail'); END;`,
+          );
+
+        it.each([
+          [
+            'a journal row deletion',
+            () =>
+              abort(
+                'fail_prune_delete',
+                'DELETE ON item_change',
+                'OLD.item_revision = 3',
+              ),
+          ],
+          [
+            'the watermark update of one item',
+            () =>
+              abort(
+                'fail_prune_watermark',
+                'UPDATE ON list_item',
+                `NEW.id = '${ITEM_2}'`,
+              ),
+          ],
+        ] as Array<[string, () => void]>)(
+          'pruning when %s fails leaves every journal row and watermark unchanged',
+          (_label, inject) => {
+            // Given two items with expired and retained entries and a failing statement
+            seedAgedJournal();
+            seedSecondItem();
+            const before = mutationState();
+            inject();
+
+            // When the pruning task runs
+            // Then it fails and no entry is deleted and no watermark is raised
+            expect(prune).toThrow('secret-trigger-detail');
+            expect(mutationState()).toEqual(before);
+            expect(journalOf(ITEM_1).map((j) => j.itemRevision)).toEqual([
+              2, 3, 4,
+            ]);
+            expect(journalOf(ITEM_2).map((j) => j.itemRevision)).toEqual([2]);
+            expect(itemRow(ITEM_1)?.prunedThroughItemRevision).toBe(0);
+            expect(itemRow(ITEM_2)?.prunedThroughItemRevision).toBe(0);
+          },
+        );
+
+        it('pruning again once the failure is gone deletes only the expired entries and raises each watermark', () => {
+          // Given a failed pruning run
+          seedAgedJournal();
+          seedSecondItem();
+          abort(
+            'fail_prune_delete',
+            'DELETE ON item_change',
+            'OLD.item_revision = 3',
+          );
+          expect(prune).toThrow('secret-trigger-detail');
+          ctx.h.sqlite.exec('DROP TRIGGER fail_prune_delete');
+
+          // When the pruning task runs again
+          const deleted = prune();
+
+          // Then the three expired entries are deleted and the younger one is kept
+          expect(deleted).toBe(3);
+          expect(journalOf(ITEM_1).map((j) => j.itemRevision)).toEqual([4]);
+          expect(journalOf(ITEM_2)).toEqual([]);
+          expect(itemRow(ITEM_1)?.prunedThroughItemRevision).toBe(3);
+          expect(itemRow(ITEM_2)?.prunedThroughItemRevision).toBe(2);
+        });
+      });
+    });
+
+    describe('idempotency', () => {
+      const accept = async () => {
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 14 });
+        const res = await mutate(mutationBody({ baseItemRevision: 14 }));
+        expect(res.status).toBe(200);
+        return res.json();
+      };
+
+      it('PUT item mutation retried twice is applied once and reports the recorded outcome with replayed true', async () => {
+        // Given an accepted mutation
+        const first = await accept();
+        const before = mutationState();
+        const events = watch(h1);
+
+        // When the identical mutation is retried twice
+        const second = await mutate(mutationBody({ baseItemRevision: 14 }));
+        const third = await mutate(mutationBody({ baseItemRevision: 14 }));
+
+        // Then both replay the outcome and nothing changes
+        for (const res of [second, third]) {
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual({ ...first, replayed: true });
+        }
+        expect(first.replayed).toBe(false);
+        expect(mutationState()).toEqual(before);
+        expect(events).toEqual([]);
+      });
+
+      it('PUT item mutation retried with an equivalent normalized name is a replay', async () => {
+        // Given an accepted rename sent with extra whitespace
+        seedRevised({ id: ITEM_1, name: 'milk', itemRevision: 1 });
+        const first = await mutate(
+          mutationBody({ changes: { name: ' Oat   milk ' } }),
+        );
+        expect(first.status).toBe(200);
+        const before = mutationState();
+
+        // When the same rename is retried with the normalized spelling
+        const res = await mutate(
+          mutationBody({ changes: { name: 'Oat milk' } }),
+        );
+
+        // Then it is the same mutation
+        expect(res.status).toBe(200);
+        expect((await res.json()).replayed).toBe(true);
+        expect(mutationState()).toEqual(before);
+      });
+
+      it('PUT item mutation retried after another change reports the recorded fields with the current item', async () => {
+        // Given an accepted crossedOff mutation and a later rename by another member
+        const first = await accept();
+        const rename = await mutate(
+          mutationBody({
+            mutationId: mid(2),
+            baseItemRevision: first.itemRevision,
+            changes: { name: 'Granny apples' },
+          }),
+          { as: 'a2' },
+        );
+        expect(rename.status).toBe(200);
+        const before = mutationState();
+
+        // When the first mutation is retried
+        const res = await mutate(mutationBody({ baseItemRevision: 14 }));
+
+        // Then the recorded outcome is paired with the current item, itemRevision and cursor
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual(
+          accepted({
+            mutationId: mid(1),
+            item: projection(itemRow(ITEM_1)!),
+            version: cursor(h1),
+            appliedFields: ['crossedOff'],
+            replayed: true,
+          }),
+        );
+        expect(itemRow(ITEM_1)?.itemRevision).toBe(16);
+        expect(mutationState()).toEqual(before);
+      });
+
+      it('PUT item mutation retried after journal pruning is still a replay', async () => {
+        // Given an accepted mutation whose journal history was pruned past its base
+        const first = await accept();
+        ctx.h.db.delete(itemChange).where(eq(itemChange.itemId, ITEM_1)).run();
+        ctx.h.db
+          .update(listItem)
+          .set({ prunedThroughItemRevision: first.itemRevision })
+          .where(eq(listItem.id, ITEM_1))
+          .run();
+        const before = mutationState();
+
+        // When the mutation is retried
+        const res = await mutate(mutationBody({ baseItemRevision: 14 }));
+
+        // Then the receipt still answers it instead of BASE_VERSION_EXPIRED
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ ...first, replayed: true });
+        expect(mutationState()).toEqual(before);
+      });
+
+      it.each([
+        ['different changes', { changes: { name: 'Other' } }, ITEM_1],
+        ['a different base', { baseItemRevision: 2 }, ITEM_1],
+        ['a different item', {}, ITEM_2],
+      ] as Array<[string, Record<string, unknown>, string]>)(
+        'PUT item mutation reusing a mutation id with %s returns 409 MUTATION_ID_REUSED and changes nothing',
+        async (_label, override, target) => {
+          // Given an accepted mutation on one item and a second item
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+          seedRevised({ id: ITEM_2, name: 'Bread', itemRevision: 1 });
+          expect((await mutate(mutationBody())).status).toBe(200);
+          const events = watch(h1);
+          const before = mutationState();
+          const expected = rejection('MUTATION_ID_REUSED', target);
+
+          // When the same mutation id is submitted with different content
+          const res = await mutate(mutationBody(override), {}, LIST_ID, target);
+
+          // Then it is rejected with the current state of the addressed item and nothing changes
+          expect(res.status).toBe(409);
+          expect(await res.json()).toEqual(expected);
+          expect(mutationState()).toEqual(before);
+          expect(events).toEqual([]);
+        },
+      );
+
+      it('PUT item mutation using a mutation id held by household two is independent and applied', async () => {
+        // Given household two accepted a mutation with the same id
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+        seedRevised({
+          id: FOREIGN_ID,
+          listId: LIST_B,
+          householdId: h2,
+          name: 'Pears',
+          itemRevision: 1,
+        });
+        const theirs = await mutate(
+          mutationBody(),
+          { as: 'b1' },
+          LIST_B,
+          FOREIGN_ID,
+        );
+        expect(theirs.status).toBe(200);
+
+        // When household one submits the same mutation id for its own item
+        const res = await mutate(mutationBody());
+
+        // Then it is applied, not replayed, and both receipts coexist
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({
+          mutationId: mid(1),
+          item: { id: ITEM_1 },
+          itemRevision: 2,
+          appliedFields: ['crossedOff'],
+          replayed: false,
+        });
+        expect(
+          receipts()
+            .map((r) => `${r.householdId}:${r.itemId}`)
+            .sort(),
+        ).toEqual([`${h1}:${ITEM_1}`, `${h2}:${FOREIGN_ID}`].sort());
+      });
+    });
+
+    describe('validation', () => {
+      type Row = [string, unknown, Array<{ path: string; message?: string }>];
+      const rows: Row[] = [
+        [
+          'an empty changes object',
+          mutationBody({ changes: {} }),
+          [{ path: 'changes' }],
+        ],
+        [
+          'an unknown changes field',
+          mutationBody({ changes: { name: 'Oat milk', price: 1 } }),
+          [{ path: 'changes' }],
+        ],
+        [
+          'an unknown changes field next to a valid one',
+          mutationBody({ changes: { crossedOff: true, price: 1 } }),
+          [{ path: 'changes' }],
+        ],
+        [
+          'a crossedOffAt changes field',
+          mutationBody({
+            changes: { crossedOff: true, crossedOffAt: NEWER },
+          }),
+          [{ path: 'changes' }],
+        ],
+        [
+          'a householdId changes field',
+          mutationBody({
+            changes: {
+              crossedOff: true,
+              householdId: 'ffffffff-ffff-7fff-8fff-ffffffffffff',
+            },
+          }),
+          [{ path: 'changes' }],
+        ],
+        [
+          'a null name',
+          mutationBody({ changes: { name: null } }),
+          [{ path: 'changes.name' }],
+        ],
+        [
+          'a numeric name',
+          mutationBody({ changes: { name: 42 } }),
+          [{ path: 'changes.name' }],
+        ],
+        [
+          'an empty name',
+          mutationBody({ changes: { name: '' } }),
+          [{ path: 'changes.name', message: NAME_LENGTH }],
+        ],
+        [
+          'a whitespace-only name',
+          mutationBody({ changes: { name: '   ' } }),
+          [{ path: 'changes.name', message: NAME_LENGTH }],
+        ],
+        [
+          'a 201-character name',
+          mutationBody({ changes: { name: 'a'.repeat(201) } }),
+          [{ path: 'changes.name', message: NAME_LENGTH }],
+        ],
+        [
+          'a null crossedOff',
+          mutationBody({ changes: { crossedOff: null } }),
+          [{ path: 'changes.crossedOff' }],
+        ],
+        [
+          'a string crossedOff',
+          mutationBody({ changes: { crossedOff: 'true' } }),
+          [{ path: 'changes.crossedOff' }],
+        ],
+        [
+          'a missing mutationId',
+          mutationBodyWithout('mutationId'),
+          [{ path: 'mutationId' }],
+        ],
+        [
+          'a non-UUID mutationId',
+          mutationBody({ mutationId: 'abc' }),
+          [{ path: 'mutationId' }],
+        ],
+        [
+          'a numeric mutationId',
+          mutationBody({ mutationId: 7 }),
+          [{ path: 'mutationId' }],
+        ],
+        [
+          'a missing baseItemRevision',
+          mutationBodyWithout('baseItemRevision'),
+          [{ path: 'baseItemRevision' }],
+        ],
+        ...([0, -1, 1.5, '1', null, 2 ** 53] as unknown[]).map(
+          (value): Row => [
+            `baseItemRevision ${String(value)}`,
+            mutationBody({ baseItemRevision: value }),
+            [{ path: 'baseItemRevision' }],
+          ],
+        ),
+        [
+          'a missing changes',
+          mutationBodyWithout('changes'),
+          [{ path: 'changes' }],
+        ],
+        ...([null, [], 'x'] as unknown[]).map(
+          (value): Row => [
+            `changes ${JSON.stringify(value)}`,
+            mutationBody({ changes: value }),
+            [{ path: 'changes' }],
+          ],
+        ),
+        [
+          'an extra changedAt field',
+          mutationBody({ changedAt: NEWER }),
+          [{ path: '' }],
+        ],
+        [
+          'an extra householdId field',
+          mutationBody({ householdId: 'ffffffff-ffff-7fff-8fff-ffffffffffff' }),
+          [{ path: '' }],
+        ],
+        [
+          'legacy fields next to a mutationId',
+          putBody({ mutationId: mid(1) }),
+          [{ path: 'baseItemRevision' }, { path: 'changes' }, { path: '' }],
+        ],
+        [
+          'only changes',
+          { changes: { crossedOff: true } },
+          [{ path: 'mutationId' }, { path: 'baseItemRevision' }],
+        ],
+        [
+          'only a mutationId',
+          { mutationId: mid(1) },
+          [{ path: 'baseItemRevision' }, { path: 'changes' }],
+        ],
+      ];
+
+      it.each(rows)(
+        'PUT item mutation with %s returns 400 and writes nothing',
+        async (_label, body, details) => {
+          // Given an item and a subscriber
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+          const events = watch(h1);
+          const before = mutationState();
+
+          // When the invalid mutation is sent
+          const res = await mutate(body);
+
+          // Then the failing paths are reported and nothing is stored
+          expect(res.status).toBe(400);
+          expect(await res.json()).toEqual(validation(...details));
+          expect(mutationState()).toEqual(before);
+          expect(events).toEqual([]);
+        },
+      );
+
+      it.each([
+        ['a 1-character name', 'a', 'a'],
+        ['a 200-character name', 'a'.repeat(200), 'a'.repeat(200)],
+        ['a name of 1 character after trimming', ' \t a \n ', 'a'],
+        [
+          'a name of 200 characters after trimming',
+          `  ${'a'.repeat(200)} \t`,
+          'a'.repeat(200),
+        ],
+        [
+          'a name of 200 characters after collapsing whitespace',
+          `${'a'.repeat(99)} \t  ${'b'.repeat(100)}`,
+          `${'a'.repeat(99)} ${'b'.repeat(100)}`,
+        ],
+      ])(
+        'PUT item mutation renaming to %s is applied with the normalized name',
+        async (_label, sent, stored) => {
+          // Given an item and a subscriber
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+          const events = watch(h1);
+          const v = counter();
+
+          // When the boundary name is submitted
+          const res = await mutate(mutationBody({ changes: { name: sent } }));
+
+          // Then it is accepted and stored in its normalized form
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual(
+            accepted({
+              mutationId: mid(1),
+              item: itemJson({
+                id: ITEM_1,
+                name: stored,
+                version: v + 1,
+                itemRevision: 2,
+                updatedAt: NOW,
+              }),
+              version: v + 1,
+              appliedFields: ['name'],
+            }),
+          );
+          expect(itemRow(ITEM_1)).toMatchObject({
+            name: stored,
+            nameKey: nameKey(stored),
+            itemRevision: 2,
+            version: v + 1,
+          });
+          expect(journalOf(ITEM_1)).toEqual([
+            journalRow(ITEM_1, 2, mid(1), ['name']),
+          ]);
+          expect(receipts()).toEqual([
+            {
+              householdId: h1,
+              mutationId: mid(1),
+              itemId: ITEM_1,
+              baseItemRevision: 1,
+              changes: JSON.stringify({ name: stored }),
+              appliedFields: '["name"]',
+              conflicts: '[]',
+              createdAt: NOW,
+            },
+          ]);
+          expect(events).toEqual([v + 1]);
+        },
+      );
+
+      it('PUT item mutation with an invalid itemId and a valid body reports only itemId', async () => {
+        // Given a valid mutation body
+        // When it is sent to an invalid item id
+        const res = await mutate(mutationBody(), {}, LIST_ID, 'not-a-uuid');
+
+        // Then only the itemId path is reported
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual(validation({ path: 'itemId' }));
+      });
+
+      it('PUT item mutation with validation errors does not leak internals', async () => {
+        // Given an invalid mutation
+        // When it is sent
+        const res = await mutate(mutationBody({ changes: {} }));
+
+        // Then the body carries no stack, SQL or file paths
+        expect(await res.text()).not.toMatch(
+          /stack|sqlite|select |insert |\.ts|node_modules/i,
+        );
+      });
+    });
+
+    describe('session and household isolation', () => {
+      it.each([
+        ['a missing cookie', null],
+        ['a garbage session cookie', 'better-auth.session_token=garbage'],
+      ] as Array<[string, string | null]>)(
+        'PUT item mutation with %s returns 401 and looks up nothing',
+        async (_label, cookie) => {
+          // Given an item and a subscriber
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+          const events = watch(h1);
+          const before = mutationState();
+
+          // When a valid mutation, and an invalid one, are sent without a session
+          const valid = await mutate(mutationBody(), { cookie });
+          const invalid = await mutate(mutationBody({ changes: {} }), {
+            cookie,
+          });
+
+          // Then both are 401 with the exact body and nothing changes
+          for (const res of [valid, invalid]) {
+            expect(res.status).toBe(401);
+            expect(await res.text()).toBe(UNAUTHENTICATED);
+          }
+          expect(mutationState()).toEqual(before);
+          expect(events).toEqual([]);
+        },
+      );
+
+      it('PUT item mutation as a user without a household returns 403', async () => {
+        // Given a signed-in user whose membership was removed
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+        await cookieFor('n1');
+        const before = mutationState();
+
+        // When they submit a mutation
+        const res = await mutate(mutationBody(), { as: 'n1' });
+
+        // Then it is forbidden and nothing changes
+        expect(res.status).toBe(403);
+        expect(await res.text()).toBe(FORBIDDEN);
+        expect(mutationState()).toEqual(before);
+      });
+
+      type Row = [
+        string,
+        () => void | Promise<void>,
+        string,
+        string,
+        Record<string, unknown>,
+      ];
+      const seedForeign = (
+        o: { deletedAt?: number | null; listId?: string } = {},
+      ) =>
+        seedRevised({
+          id: FOREIGN_ID,
+          listId: o.listId ?? LIST_B,
+          householdId: h2,
+          name: 'Pears',
+          deletedAt: o.deletedAt,
+          itemRevision: 5,
+        });
+      const theirReceipt = async () => {
+        seedForeign();
+        const res = await mutate(
+          mutationBody({ baseItemRevision: 5 }),
+          { as: 'b1' },
+          LIST_B,
+          FOREIGN_ID,
+        );
+        expect(res.status).toBe(200);
+      };
+
+      const forbiddenRows: Row[] = [
+        [
+          'a live item of household two',
+          () => seedForeign(),
+          LIST_B,
+          FOREIGN_ID,
+          {},
+        ],
+        ['a missing item id', () => undefined, LIST_B, UNKNOWN_ID, {}],
+        [
+          'an item of household one',
+          () => seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 }),
+          LIST_B,
+          ITEM_1,
+          {},
+        ],
+        [
+          'a base revision ahead of the foreign item',
+          () => seedForeign(),
+          LIST_B,
+          FOREIGN_ID,
+          { baseItemRevision: 99 },
+        ],
+        [
+          'an item on a soft-deleted list of household two',
+          () => seedForeign({ listId: LIST_B_DELETED }),
+          LIST_B_DELETED,
+          FOREIGN_ID,
+          {},
+        ],
+        [
+          'a mutation id household two already used',
+          theirReceipt,
+          LIST_B,
+          FOREIGN_ID,
+          {},
+        ],
+      ];
+
+      it.each(forbiddenRows)(
+        'PUT item mutation through a list of household two for %s returns 403 before any item lookup',
+        async (_label, arrange, list, item, override) => {
+          // Given the arranged data and subscribers on both households
+          await arrange();
+          const events1 = watch(h1);
+          const events2 = watch(h2);
+          const before = mutationState();
+
+          // When household one mutates through household two's list
+          const res = await mutate(mutationBody(override), {}, list, item);
+
+          // Then every case gives the same 403 and nothing is read, stored or published
+          expect(res.status).toBe(403);
+          expect(await res.text()).toBe(FORBIDDEN);
+          expect(mutationState()).toEqual(before);
+          expect(events1).toEqual([]);
+          expect(events2).toEqual([]);
+        },
+      );
+
+      const notFoundRows: Row[] = [
+        ['a missing item', () => undefined, LIST_ID, UNKNOWN_ID, {}],
+        [
+          'a live item of household two',
+          () => seedForeign(),
+          LIST_ID,
+          FOREIGN_ID,
+          {},
+        ],
+        [
+          'a soft-deleted item of household two',
+          () => seedForeign({ deletedAt: STORED }),
+          LIST_ID,
+          FOREIGN_ID,
+          {},
+        ],
+        [
+          'a live item on another list of the household',
+          () =>
+            seedRevised({
+              id: OTHER_LIST_ID,
+              listId: LIST_2,
+              name: 'Rice',
+              itemRevision: 1,
+            }),
+          LIST_ID,
+          OTHER_LIST_ID,
+          {},
+        ],
+        [
+          'an item on a soft-deleted list of the household',
+          () =>
+            seedRevised({
+              id: OTHER_LIST_ID,
+              listId: LIST_DELETED,
+              name: 'Rice',
+              itemRevision: 1,
+            }),
+          LIST_ID,
+          OTHER_LIST_ID,
+          {},
+        ],
+        [
+          'a soft-deleted item on the list',
+          () =>
+            seedRevised({
+              id: ITEM_1,
+              name: 'Apples',
+              deletedAt: STORED,
+              itemRevision: 1,
+            }),
+          LIST_ID,
+          ITEM_1,
+          {},
+        ],
+        [
+          'a base revision ahead of the foreign item',
+          () => seedForeign(),
+          LIST_ID,
+          FOREIGN_ID,
+          { baseItemRevision: 99 },
+        ],
+        [
+          'a mutation id household two already used',
+          theirReceipt,
+          LIST_ID,
+          FOREIGN_ID,
+          {},
+        ],
+      ];
+
+      it.each(notFoundRows)(
+        'PUT item mutation through an own list for %s returns the same 404 and discloses nothing',
+        async (_label, arrange, list, item, override) => {
+          // Given the arranged data and subscribers on both households
+          await arrange();
+          const events1 = watch(h1);
+          const events2 = watch(h2);
+          const before = mutationState();
+
+          // When household one mutates through its own list
+          const res = await mutate(mutationBody(override), {}, list, item);
+
+          // Then the body is the fixed not_found response and nothing changes
+          expect(res.status).toBe(404);
+          expect(res.headers.get('content-type')).toContain('application/json');
+          expect(await res.text()).toBe(NOT_FOUND);
+          expect(mutationState()).toEqual(before);
+          expect(events1).toEqual([]);
+          expect(events2).toEqual([]);
+        },
+      );
+
+      it.each([
+        ['an unknown list', MISSING_LIST],
+        ['a soft-deleted list of the household', LIST_DELETED],
+      ])(
+        'PUT item mutation through %s returns 404 and writes nothing',
+        async (_label, list) => {
+          // Given an item
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+          const before = mutationState();
+
+          // When a mutation is sent through the list
+          const res = await mutate(mutationBody(), {}, list);
+
+          // Then not_found and nothing changes
+          expect(res.status).toBe(404);
+          expect(await res.text()).toBe(NOT_FOUND);
+          expect(mutationState()).toEqual(before);
+        },
+      );
+
+      const touching = (queries: TracedQuery[], ...tables: string[]) =>
+        queries.filter((q) => tables.some((t) => q.sql.includes(`"${t}"`)));
+
+      const traced = async (send: () => Promise<Response>) => {
+        const trace = ctx.h.traceQueries();
+        try {
+          const res = await send();
+          return { res, queries: [...trace.queries] };
+        } finally {
+          trace.stop();
+        }
+      };
+
+      it.each([
+        ['a missing cookie', null],
+        ['a garbage session cookie', 'better-auth.session_token=garbage'],
+      ] as Array<[string, string | null]>)(
+        'PUT item mutation with %s runs no list, item, journal, receipt or version query',
+        async (_label, cookie) => {
+          // Given an item
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+
+          // When valid and invalid mutations are sent without a session
+          const { res, queries } = await traced(async () => {
+            const valid = await mutate(mutationBody(), { cookie });
+            await mutate(mutationBody({ changes: {} }), { cookie });
+            return valid;
+          });
+
+          // Then the request is rejected before any household resource is read
+          expect(res.status).toBe(401);
+          expect(await res.text()).toBe(UNAUTHENTICATED);
+          expect(
+            touching(
+              queries,
+              'shopping_list',
+              'list_item',
+              'item_change',
+              'item_mutation_receipt',
+              'change_counter',
+            ),
+          ).toEqual([]);
+        },
+      );
+
+      it.each(forbiddenRows)(
+        'PUT item mutation through a list of household two for %s authorizes the list and runs no item, journal or receipt query',
+        async (_label, arrange, list, item, override) => {
+          // Given the arranged data and a signed-in member
+          await arrange();
+          await cookieFor('a1');
+
+          // When household one mutates through household two's list
+          const { res, queries } = await traced(() =>
+            mutate(mutationBody(override), {}, list, item),
+          );
+
+          // Then the only household resource read is the route list and the request is a 403
+          expect(res.status).toBe(403);
+          expect(await res.text()).toBe(FORBIDDEN);
+          expect(
+            touching(
+              queries,
+              'list_item',
+              'item_change',
+              'item_mutation_receipt',
+              'change_counter',
+            ),
+          ).toEqual([]);
+          expect(touching(queries, 'shopping_list')).toEqual([
+            {
+              sql: expect.stringMatching(/^select .* from "shopping_list" /),
+              params: [list],
+            },
+          ]);
+        },
+      );
+
+      it.each(
+        notFoundRows.filter(
+          ([label]) => label !== 'a soft-deleted item on the list',
+        ),
+      )(
+        'PUT item mutation through an own list for %s runs one household and list scoped item query and no journal or receipt query',
+        async (_label, arrange, list, item, override) => {
+          // Given the arranged data and a signed-in member
+          await arrange();
+          await cookieFor('a1');
+
+          // When household one mutates through its own list
+          const { res, queries } = await traced(() =>
+            mutate(mutationBody(override), {}, list, item),
+          );
+
+          // Then the item is looked up once by id, session household and route list, and nothing else is read
+          expect(res.status).toBe(404);
+          expect(await res.text()).toBe(NOT_FOUND);
+          expect(
+            touching(queries, 'item_change', 'item_mutation_receipt'),
+          ).toEqual([]);
+          const lookups = touching(queries, 'list_item');
+          expect(lookups).toEqual([
+            { sql: expect.any(String), params: [item, h1, list] },
+          ]);
+          expect(lookups[0].sql).toMatch(
+            /where \("list_item"\."id" = \? and "list_item"\."household_id" = \? and "list_item"\."list_id" = \?\)/,
+          );
+        },
+      );
+
+      it('PUT item mutation by a second member of the household succeeds', async () => {
+        // Given an item and a household member who is not the owner
+        seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+
+        // When the member submits a mutation
+        const res = await mutate(mutationBody(), { as: 'a2' });
+
+        // Then it is applied under the session household
+        expect(res.status).toBe(200);
+        expect(itemRow(ITEM_1)).toMatchObject({
+          householdId: h1,
+          itemRevision: 2,
+        });
+      });
+    });
+
+    describe('atomicity', () => {
+      it.each([
+        ['the item update', 'UPDATE', 'list_item'],
+        ['the journal insert', 'INSERT', 'item_change'],
+        ['the receipt insert', 'INSERT', 'item_mutation_receipt'],
+      ] as Array<[string, 'INSERT' | 'UPDATE', string]>)(
+        'PUT item mutation when %s fails rolls back with a generic 500 and no event',
+        async (_label, event, table) => {
+          // Given an item, a failing statement inside the transaction and a subscriber
+          seedRevised({ id: ITEM_1, name: 'Apples', itemRevision: 1 });
+          failOn(event, table);
+          const events = watch(h1);
+          const before = mutationState();
+
+          // When a mutation is submitted
+          const res = await mutate(mutationBody());
+
+          // Then row, itemRevision, cursor, journal and receipts are unchanged
+          expect(res.status).toBe(500);
+          const text = await res.text();
+          expect(text).toBe(INTERNAL);
+          expect(text).not.toContain('secret-trigger-detail');
+          expect(mutationState()).toEqual(before);
+          expect(events).toEqual([]);
+        },
+      );
     });
   });
 
@@ -2194,18 +3954,12 @@ describe('Items API', () => {
       },
     );
 
-    it.each(
-      (['PUT', 'DELETE'] as const).flatMap((method) =>
-        (
-          [
-            ['live', null],
-            ['soft-deleted', STORED],
-          ] as Array<[string, number | null]>
-        ).map(([state, deletedAt]) => [method, state, deletedAt] as const),
-      ),
-    )(
-      '%s of a %s item of household two through an own list returns 403',
-      async (method, _state, deletedAt) => {
+    it.each([
+      ['live', null],
+      ['soft-deleted', STORED],
+    ] as Array<[string, number | null]>)(
+      'PUT of a %s item of household two through an own list returns the same 404 as a missing item',
+      async (_state, deletedAt) => {
         // Given an item of household two
         seedItem({
           id: FOREIGN_ID,
@@ -2217,10 +3971,34 @@ describe('Items API', () => {
         const before = snapshot();
 
         // When household one targets it through its own list
-        const res =
-          method === 'PUT'
-            ? await putItem(LIST_ID, FOREIGN_ID, putBody())
-            : await delItem(LIST_ID, FOREIGN_ID, NEWER);
+        const res = await putItem(LIST_ID, FOREIGN_ID, putBody());
+
+        // Then it is not found and the item is unchanged
+        expect(res.status).toBe(404);
+        expect(await res.text()).toBe(NOT_FOUND);
+        expect(snapshot()).toEqual(before);
+        expect(events).toEqual([]);
+      },
+    );
+
+    it.each([
+      ['live', null],
+      ['soft-deleted', STORED],
+    ] as Array<[string, number | null]>)(
+      'DELETE of a %s item of household two through an own list returns 403',
+      async (_state, deletedAt) => {
+        // Given an item of household two
+        seedItem({
+          id: FOREIGN_ID,
+          listId: LIST_B,
+          householdId: h2,
+          deletedAt,
+        });
+        const events = watch(h2);
+        const before = snapshot();
+
+        // When household one targets it through its own list
+        const res = await delItem(LIST_ID, FOREIGN_ID, NEWER);
 
         // Then it is forbidden and the item is unchanged
         expect(res.status).toBe(403);
@@ -2394,7 +4172,7 @@ describe('Items API', () => {
     const X = OTHER_LIST_ID;
 
     type Row = [string, () => void, () => Promise<Response>];
-    const rows: Row[] = [
+    const putRows: Row[] = [
       [
         'PUT of a live item with a new name',
         () => seedItem({ id: X, listId: LIST_2 }),
@@ -2420,6 +4198,8 @@ describe('Items API', () => {
         () => seedItem({ id: X, listId: LIST_DELETED }),
         () => putItem(LIST_ID, X, putBody()),
       ],
+    ];
+    const deleteRows: Row[] = [
       [
         'DELETE of a live item with a newer changedAt',
         () => seedItem({ id: X, listId: LIST_2 }),
@@ -2442,7 +4222,27 @@ describe('Items API', () => {
       ],
     ];
 
-    it.each(rows)(
+    it.each(putRows)(
+      '%s returns the same 404 as a missing item and changes nothing',
+      async (_label, seed, send) => {
+        // Given an item on another list of the household and a subscriber
+        seed();
+        seedSuggestion(h1, 'ice cream', 2);
+        const events = watch(h1);
+        const before = snapshot();
+
+        // When it is targeted through the list
+        const res = await send();
+
+        // Then 404 with the exact body and no mutation, version, event or suggestion change
+        expect(res.status).toBe(404);
+        expect(await res.text()).toBe(NOT_FOUND);
+        expect(snapshot()).toEqual(before);
+        expect(events).toEqual([]);
+      },
+    );
+
+    it.each(deleteRows)(
       '%s returns 409 item_on_other_list and changes nothing',
       async (_label, seed, send) => {
         // Given an item on another list of the household and a subscriber
@@ -2475,9 +4275,9 @@ describe('Items API', () => {
         putBody({ name: 'milk', crossedOff: true }),
       );
 
-      // Then 409 and neither item changes
-      expect(res.status).toBe(409);
-      expect(await res.text()).toBe(ITEM_ON_OTHER_LIST);
+      // Then 404 and neither item changes
+      expect(res.status).toBe(404);
+      expect(await res.text()).toBe(NOT_FOUND);
       expect(snapshot()).toEqual(before);
     });
 
@@ -2517,8 +4317,8 @@ describe('Items API', () => {
       },
     );
 
-    it('PUT item replayed after a cross-list 409 returns the same conflict', async () => {
-      // Given a cross-list 409
+    it('PUT item replayed after a cross-list 404 returns the same 404', async () => {
+      // Given a cross-list 404
       seedItem({ id: X, listId: LIST_2 });
       const first = await putItem(LIST_ID, X, putBody());
       const before = snapshot();
@@ -2527,9 +4327,9 @@ describe('Items API', () => {
       const second = await putItem(LIST_ID, X, putBody());
 
       // Then the same error and no change
-      expect(first.status).toBe(409);
-      expect(second.status).toBe(409);
-      expect(await second.text()).toBe(ITEM_ON_OTHER_LIST);
+      expect(first.status).toBe(404);
+      expect(second.status).toBe(404);
+      expect(await second.text()).toBe(NOT_FOUND);
       expect(snapshot()).toEqual(before);
     });
   });
@@ -2680,7 +4480,7 @@ describe('Items API', () => {
       ],
       [
         'a cross-list id',
-        409,
+        404,
         () => putItem(LIST_ID, OTHER_LIST_ID, putBody({ name: 'Oat' })),
       ],
       [
@@ -3140,7 +4940,7 @@ describe('Items API', () => {
 
       // Then no version is assigned or published
       expect(results.map((r) => r.status)).toEqual([
-        200, 200, 204, 204, 200, 204, 400, 403, 404,
+        200, 200, 204, 204, 200, 204, 400, 404, 404,
       ]);
       expect(snapshot()).toEqual(before);
       expect(events1).toEqual([]);

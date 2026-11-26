@@ -1,7 +1,8 @@
 {
   "households": {
     "a": "The Smiths",
-    "b": "The Joneses"
+    "b": "The Joneses",
+    "c": "The Parkers"
   },
   "personas": {
     "sam": {
@@ -21,7 +22,32 @@
       "email": "jo@example.com",
       "password": "meadow-quartz-ribbon",
       "household": "b"
+    },
+    "pat": {
+      "name": "Pat",
+      "email": "pat@example.com",
+      "password": "lantern-orbit-pebble",
+      "household": "c"
     }
+  },
+  "syncPair": {
+    "household": "The Quinns",
+    "sam": {
+      "name": "Sam",
+      "emailPrefix": "sam",
+      "password": "juniper-delta-harbor"
+    },
+    "alex": {
+      "name": "Alex",
+      "emailPrefix": "alex",
+      "password": "cobalt-willow-ember"
+    }
+  },
+  "emptyState": {
+    "household": "The Emptys",
+    "name": "Eve",
+    "emailPrefix": "eve",
+    "password": "saffron-glacier-thistle"
   },
   "suggestions": ["oat milk", "oranges", "olive oil"]
 }
