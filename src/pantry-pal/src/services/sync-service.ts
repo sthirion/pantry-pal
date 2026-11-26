@@ -1,8 +1,9 @@
-import { and, eq, gt, isNull, max } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { SyncResponse } from '@pantry-pal/shared';
 import type { AppDatabase } from '../db/database.js';
+import { householdVersion } from '../db/household-cursor.js';
 import { listItem, shoppingList, syncState } from '../db/schema.js';
-import { toListItem } from './item-service.js';
+import { toListItem } from './item-access.js';
 import { toShoppingList } from './list-service.js';
 
 export class SyncService {
@@ -44,21 +45,8 @@ export class SyncService {
         .orderBy(listItem.version)
         .all();
 
-      const listMax =
-        tx
-          .select({ value: max(shoppingList.version) })
-          .from(shoppingList)
-          .where(eq(shoppingList.householdId, householdId))
-          .get()?.value ?? 0;
-      const itemMax =
-        tx
-          .select({ value: max(listItem.version) })
-          .from(listItem)
-          .where(eq(listItem.householdId, householdId))
-          .get()?.value ?? 0;
-
       return {
-        version: Math.max(listMax, itemMax),
+        version: householdVersion(tx, householdId),
         full,
         lists: lists.map(toShoppingList),
         items: items.map(toListItem),

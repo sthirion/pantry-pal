@@ -5,10 +5,15 @@ import {
   backoffDelayMs,
   classifyStatus,
   enqueue,
+  hasQueuedCreate,
+  nextSendable,
+  pendingCount,
   pendingTargets,
   peekOldest,
+  rebaseNextUnsentEdit,
   remapPendingIds,
 } from './outbox';
+import type { UpdateItemMutation } from './outbox.types';
 
 beforeEach(clearAllStores);
 
@@ -119,6 +124,120 @@ describe('outbox queue', () => {
     expect(all[1]).toMatchObject({ body: { itemIds: ['new', 'other'] } });
     expect(all[2]).toMatchObject({ listId: 'new' });
     expect(all[3]).toMatchObject({ itemId: 'other' });
+  });
+
+  it('keeps the blocked mark and remaps updateItem when an id is merged', async () => {
+    await db.outbox.add({
+      mutation: edit('1', 'old', { crossedOff: true }),
+      blocked: { reason: 'rejected', status: 404 },
+    });
+
+    await remapPendingIds('old', 'new');
+
+    expect(await db.outbox.toArray()).toMatchObject([
+      {
+        mutation: { itemId: 'new' },
+        blocked: { reason: 'rejected', status: 404 },
+      },
+    ]);
+  });
+});
+
+const edit = (
+  id: string,
+  itemId: string,
+  changes: UpdateItemMutation['changes'],
+  baseItemRevision = 14,
+): UpdateItemMutation => ({
+  id,
+  kind: 'updateItem',
+  listId: 'l',
+  itemId,
+  baseItemRevision,
+  changes,
+});
+const block = (seq: number) =>
+  db.outbox.update(seq, {
+    blocked: { reason: 'BASE_VERSION_EXPIRED', status: 409 },
+  });
+
+describe('blocked edits', () => {
+  it('skips every queued change of a blocked item but still offers other items', async () => {
+    const changedAt = '2026-01-01T00:00:00.000Z';
+    await enqueue(edit('1', 'a', { crossedOff: true }));
+    await enqueue(edit('2', 'a', { name: 'x' }));
+    await enqueue({
+      id: '3',
+      kind: 'deleteItems',
+      listId: 'l',
+      body: { itemIds: ['a', 'z'], changedAt },
+    });
+    await enqueue(edit('4', 'b', { crossedOff: true }));
+    await block((await peekOldest())!.seq);
+
+    expect((await nextSendable())?.mutation.id).toBe('4');
+  });
+
+  it('offers nothing when every queued change is stopped', async () => {
+    await enqueue(edit('1', 'a', { crossedOff: true }));
+    await enqueue(edit('2', 'a', { name: 'x' }));
+    await block((await peekOldest())!.seq);
+
+    expect(await nextSendable()).toBeUndefined();
+  });
+
+  it('does not count stopped changes as waiting or protect their rows from a pull', async () => {
+    await enqueue(edit('1', 'a', { crossedOff: true }));
+    await enqueue(edit('2', 'a', { name: 'x' }));
+    await enqueue(edit('3', 'b', { crossedOff: true }));
+    await block((await peekOldest())!.seq);
+
+    expect(await pendingCount()).toBe(1);
+    expect(await pendingTargets()).toEqual(new Set(['b']));
+  });
+});
+
+describe('rebaseNextUnsentEdit', () => {
+  it('sets the base of only the next unsent edit of that item', async () => {
+    await enqueue(edit('1', 'a', { crossedOff: true }, 14));
+    await enqueue(edit('2', 'b', { crossedOff: true }, 14));
+    await enqueue(edit('3', 'a', { name: 'x' }, 14));
+    await enqueue(edit('4', 'a', { name: 'y' }, 14));
+    await db.outbox.delete((await peekOldest())!.seq);
+
+    await rebaseNextUnsentEdit('a', 15);
+
+    expect(
+      (await db.outbox.toArray()).map(
+        ({ mutation }) => (mutation as UpdateItemMutation).baseItemRevision,
+      ),
+    ).toEqual([14, 15, 14]);
+  });
+
+  it('never changes the mutation id or patch', async () => {
+    await enqueue(edit('1', 'a', { name: 'x' }, 14));
+
+    await rebaseNextUnsentEdit('a', 15);
+
+    expect((await peekOldest())?.mutation).toEqual(
+      edit('1', 'a', { name: 'x' }, 15),
+    );
+  });
+});
+
+describe('hasQueuedCreate', () => {
+  it('is true only while a create of that item is queued', async () => {
+    await enqueue({
+      id: '1',
+      kind: 'putItem',
+      listId: 'l',
+      itemId: 'a',
+      body: { name: 'x', crossedOff: false, changedAt: 't' },
+    });
+    await enqueue(edit('2', 'b', { name: 'y' }));
+
+    expect(await hasQueuedCreate('a')).toBe(true);
+    expect(await hasQueuedCreate('b')).toBe(false);
   });
 });
 

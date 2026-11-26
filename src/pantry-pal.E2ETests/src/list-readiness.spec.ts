@@ -38,7 +38,7 @@ function observeReadiness(target: { listName: string; itemName: string }) {
     [
       'list heading visible',
       () => {
-        const heading = [...document.querySelectorAll('h1')].find(
+        const heading = Array.from(document.querySelectorAll('h1')).find(
           (h1) => h1.textContent === target.listName,
         );
         return usable(heading ?? null);
@@ -52,7 +52,7 @@ function observeReadiness(target: { listName: string; itemName: string }) {
       'item-action button enabled',
       () =>
         usable(
-          [...document.querySelectorAll('button')].find(
+          Array.from(document.querySelectorAll('button')).find(
             (button) =>
               button.getAttribute('aria-label') ===
               `Actions for ${target.itemName}`,

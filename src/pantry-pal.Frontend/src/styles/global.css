@@ -175,8 +175,8 @@ body {
   min-width: 44px;
 }
 
-.sync-status__summary:empty {
-  display: none;
+.sync-status__summary {
+  min-height: 1.5em; /* one body line (line-height 1.5) so the list doesn't shift when text appears */
 }
 
 .app-main {
@@ -246,6 +246,47 @@ body {
 .list-row__actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.recovery {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 2px solid var(--color-border);
+  border-radius: 0.75rem;
+}
+
+.recovery h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+}
+
+.recovery__entry {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.recovery__message {
+  margin: 0;
+  font-weight: 600;
+}
+
+.recovery__details {
+  margin: 0;
+}
+
+.recovery__problems {
+  margin: 0;
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.recovery__details dt {
+  font-weight: 600;
+}
+
+.recovery__details dd {
+  margin: 0 0 0.25rem 1rem;
+  overflow-wrap: anywhere;
 }
 
 .list-row__edit {

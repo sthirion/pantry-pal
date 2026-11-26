@@ -72,6 +72,47 @@ export const en = {
       save: 'Save',
     },
     delete: { short: 'Delete' },
+    recovery: {
+      heading: 'Changes to review',
+      summary_one: '{{count}} change needs your review.',
+      summary_other: '{{count}} changes need your review.',
+      unnamedItem: 'this item',
+      field: { name: 'Name', crossedOff: 'Crossed off' },
+      yes: 'Yes',
+      no: 'No',
+      serverValue: 'Current value: {{value}}',
+      yourValue: 'Your value: {{value}}',
+      conflict: {
+        message:
+          'Someone else changed "{{name}}" while you were offline. The current value was kept.',
+        keep: 'Keep current',
+        keepLabel: 'Keep current value of {{name}}',
+        useMine: 'Use my value',
+        useMineLabel: 'Use my value for {{name}}',
+      },
+      blocked: {
+        BASE_VERSION_EXPIRED:
+          'Your change to "{{name}}" is too old to merge automatically. Nothing was applied.',
+        BASE_VERSION_AHEAD:
+          'Your change to "{{name}}" was based on a version the server does not have. Nothing was applied.',
+        MUTATION_ID_REUSED:
+          'Your change to "{{name}}" could not be sent because its identifier was already used. Nothing was applied.',
+        rejected:
+          'Your change to "{{name}}" was not accepted (error {{status}}). Nothing was applied.',
+        rejectedInvalid:
+          'Your change to "{{name}}" was not valid. Nothing was applied. Discard it and enter the value again.',
+        rejectedForbidden:
+          'You do not have access to the list for your change to "{{name}}". Nothing was applied.',
+        rejectedNotFound:
+          'Your change to "{{name}}" could not be applied because the item was not found in this list. Nothing was applied.',
+        problems: 'Problems with your change to {{name}}',
+        problem: '{{field}}: {{message}}',
+        discard: 'Discard my change',
+        discardLabel: 'Discard my change to {{name}}',
+        retry: 'Apply my change again',
+        retryLabel: 'Apply my change again for {{name}}',
+      },
+    },
     clear: {
       button: 'Clear crossed off',
       group: 'Confirm clearing crossed-off items',
@@ -92,6 +133,10 @@ export const en = {
     offline: 'You are offline. Changes are saved on this device.',
     pending_one: '{{count}} change waiting to sync',
     pending_other: '{{count}} changes waiting to sync',
+    needsReview_one:
+      '{{count}} change needs your review. Open its list to resolve it.',
+    needsReview_other:
+      '{{count}} changes need your review. Open their lists to resolve them.',
     authRequired: 'Your session has expired. Sign in to keep syncing.',
     signInLink: 'Sign in',
     dropped:

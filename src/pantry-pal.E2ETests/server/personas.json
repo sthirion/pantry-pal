@@ -30,5 +30,18 @@
       "household": "c"
     }
   },
+  "syncPair": {
+    "household": "The Quinns",
+    "sam": {
+      "name": "Sam",
+      "emailPrefix": "sam",
+      "password": "juniper-delta-harbor"
+    },
+    "alex": {
+      "name": "Alex",
+      "emailPrefix": "alex",
+      "password": "cobalt-willow-ember"
+    }
+  },
   "suggestions": ["oat milk", "oranges", "olive oil"]
 }

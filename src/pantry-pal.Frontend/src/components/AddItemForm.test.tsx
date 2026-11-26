@@ -17,6 +17,7 @@ const listItem = (
   name,
   crossedOffAt: null,
   version: 1,
+  itemRevision: 1,
   updatedAt: NOW,
   deletedAt: null,
   ...overrides,

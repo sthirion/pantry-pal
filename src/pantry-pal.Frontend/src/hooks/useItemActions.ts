@@ -1,3 +1,9 @@
+import {
+  discardBlockedEdit,
+  keepServerValues,
+  resubmitAttemptedValues,
+  resubmitBlockedEdit,
+} from '../services/itemRecovery';
 import { clearCrossedOff, removeItem, saveItem } from '../services/mutations';
 import { syncEngine } from '../services/sync-engine';
 
@@ -21,6 +27,20 @@ export function useItemActions(listId: string) {
     },
     clearCrossedOff: async () => {
       await clearCrossedOff(listId);
+      flush();
+    },
+    /** Reconciliation of conflicts and blocked edits; each resubmission is a new mutation. */
+    keepServerValues,
+    resubmitAttemptedValues: async (mutationId: string) => {
+      await resubmitAttemptedValues(mutationId);
+      flush();
+    },
+    discardBlockedEdit: async (seq: number) => {
+      await discardBlockedEdit(seq);
+      flush();
+    },
+    resubmitBlockedEdit: async (seq: number) => {
+      await resubmitBlockedEdit(seq);
       flush();
     },
   };

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import type { ItemField } from '@pantry-pal/shared';
 import {
+  canonicalChanges,
+  changedFields,
   crossedOffAtFor,
   decideDelete,
   isBatchEligible,
   isMergeIgnored,
   isPutIgnored,
   isStale,
+  mergeChanges,
   renamesItem,
 } from './item-rules.js';
 import type { ItemState } from './item-rules.js';
@@ -140,5 +144,114 @@ describe('isBatchEligible', () => {
 
   it('rejects a soft-deleted row', () => {
     expect(isBatchEligible(state({ deletedAt: T }), T + 1)).toBe(false);
+  });
+});
+
+const current = { name: 'Milk', crossedOff: false };
+const none = new Set<ItemField>();
+
+describe('mergeChanges', () => {
+  it('applies fields no newer change touched', () => {
+    expect(
+      mergeChanges(current, { name: 'Bread', crossedOff: true }, none),
+    ).toEqual({ changed: ['name', 'crossedOff'], conflicts: [] });
+  });
+
+  it('applies a disjoint field while the other field changed since the base', () => {
+    expect(
+      mergeChanges(current, { crossedOff: true }, new Set<ItemField>(['name'])),
+    ).toEqual({ changed: ['crossedOff'], conflicts: [] });
+  });
+
+  it.each<[ItemField, Record<string, unknown>, Record<string, unknown>]>([
+    [
+      'name',
+      { name: 'Bread' },
+      { field: 'name', attemptedValue: 'Bread', serverValue: 'Milk' },
+    ],
+    [
+      'crossedOff',
+      { crossedOff: true },
+      { field: 'crossedOff', attemptedValue: true, serverValue: false },
+    ],
+  ])(
+    'reports an overlapping %s as a conflict and does not apply it',
+    (field, changes, conflict) => {
+      expect(mergeChanges(current, changes, new Set([field]))).toEqual({
+        changed: [],
+        conflicts: [conflict],
+      });
+    },
+  );
+
+  it('reports an overlapping field as a conflict even when the values are equal', () => {
+    expect(
+      mergeChanges(current, { name: 'Milk' }, new Set<ItemField>(['name']))
+        .conflicts,
+    ).toEqual([{ field: 'name', attemptedValue: 'Milk', serverValue: 'Milk' }]);
+  });
+
+  it('splits one patch into an applied field and a conflict', () => {
+    expect(
+      mergeChanges(
+        current,
+        { name: 'Bread', crossedOff: true },
+        new Set<ItemField>(['name']),
+      ),
+    ).toEqual({
+      changed: ['crossedOff'],
+      conflicts: [
+        { field: 'name', attemptedValue: 'Bread', serverValue: 'Milk' },
+      ],
+    });
+  });
+
+  it('treats a field already at its target value as a no-op', () => {
+    expect(
+      mergeChanges(current, { name: 'Milk', crossedOff: false }, none),
+    ).toEqual({ changed: [], conflicts: [] });
+  });
+
+  it('treats a case-only rename as a change', () => {
+    expect(mergeChanges(current, { name: 'milk' }, none).changed).toEqual([
+      'name',
+    ]);
+  });
+});
+
+describe('canonicalChanges', () => {
+  it('orders fields so equal patches serialize equally', () => {
+    expect(canonicalChanges({ crossedOff: true, name: 'a' })).toBe(
+      canonicalChanges({ name: 'a', crossedOff: true }),
+    );
+    expect(canonicalChanges({ name: 'a', crossedOff: true })).toBe(
+      '{"name":"a","crossedOff":true}',
+    );
+  });
+
+  it('omits absent fields and distinguishes false from absent', () => {
+    expect(canonicalChanges({ crossedOff: false })).toBe(
+      '{"crossedOff":false}',
+    );
+    expect(canonicalChanges({ name: 'a' })).toBe('{"name":"a"}');
+  });
+});
+
+describe('changedFields', () => {
+  it.each([
+    ['nothing', { name: 'Milk', crossedOff: false }, []],
+    ['name', { name: 'Bread', crossedOff: false }, ['name']],
+    ['crossedOff', { name: 'Milk', crossedOff: true }, ['crossedOff']],
+    ['both', { name: 'Bread', crossedOff: true }, ['name', 'crossedOff']],
+  ])('reports %s', (_label, target, expected) => {
+    expect(changedFields({ name: 'Milk', crossedOffAt: null }, target)).toEqual(
+      expected,
+    );
+  });
+
+  it('compares crossedOff by whether a cross-off time is stored', () => {
+    expect(changedFields({ name: 'Milk', crossedOffAt: 5 }, current)).toEqual([
+      'crossedOff',
+    ]);
   });
 });

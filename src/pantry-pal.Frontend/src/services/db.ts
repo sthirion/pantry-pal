@@ -1,16 +1,8 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type {
-  ListItem,
-  OutboxMutation,
-  ShoppingList,
-  Suggestion,
-} from '@pantry-pal/shared';
+import type { ListItem, ShoppingList, Suggestion } from '@pantry-pal/shared';
+import type { ConflictRecord, OutboxEntry } from './outbox.types';
 
-/** One queued change; `seq` is auto-incremented, so it orders the queue. */
-export interface OutboxEntry {
-  seq: number;
-  mutation: OutboxMutation;
-}
+export type { OutboxEntry } from './outbox.types';
 
 export type MetaKey = 'cursor' | 'userId' | 'householdId';
 
@@ -30,6 +22,7 @@ export class PantryDb extends Dexie {
   suggestions!: EntityTable<StoredSuggestion, 'nameKey'>;
   outbox!: EntityTable<OutboxEntry, 'seq'>;
   meta!: EntityTable<MetaRecord, 'key'>;
+  itemConflicts!: EntityTable<ConflictRecord, 'mutationId'>;
 
   constructor(name = 'pantry-pal') {
     super(name);
@@ -40,6 +33,10 @@ export class PantryDb extends Dexie {
       outbox: '++seq',
       meta: 'key',
     });
+    this.version(2)
+      .stores({ itemConflicts: 'mutationId, listId' })
+      // Rows stored before 2 lack `itemRevision`; the next pull starts from scratch to fill it in.
+      .upgrade((tx) => tx.table('meta').delete('cursor'));
   }
 }
 
@@ -62,7 +59,7 @@ export async function setMeta(
 export async function clearAllStores(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.lists, db.items, db.suggestions, db.outbox, db.meta],
+    [db.lists, db.items, db.suggestions, db.outbox, db.meta, db.itemConflicts],
     async () => {
       await Promise.all([
         db.lists.clear(),
@@ -70,6 +67,7 @@ export async function clearAllStores(): Promise<void> {
         db.suggestions.clear(),
         db.outbox.clear(),
         db.meta.clear(),
+        db.itemConflicts.clear(),
       ]);
     },
   );

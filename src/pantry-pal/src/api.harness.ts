@@ -53,7 +53,49 @@ export interface Harness {
   db: AppDatabase;
   /** Number of times a test-only echo handler actually ran. */
   calls: { echo: number };
+  /** Starts recording every statement the app's connection executes until `stop()` is called. */
+  traceQueries: () => QueryTrace;
   stop: () => Promise<void>;
+}
+
+export interface TracedQuery {
+  sql: string;
+  params: unknown[];
+}
+
+export interface QueryTrace {
+  /** Executed statements in order, with their bound parameters. */
+  readonly queries: TracedQuery[];
+  stop: () => void;
+}
+
+const TRACED_METHODS = ['get', 'all', 'run', 'iterate'] as const;
+
+function traceQueries(sqlite: Database.Database): QueryTrace {
+  const queries: TracedQuery[] = [];
+  const prepare = sqlite.prepare as unknown as (
+    this: Database.Database,
+    source: string,
+  ) => Record<string, unknown>;
+  Object.assign(sqlite, {
+    prepare(this: Database.Database, source: string) {
+      const statement = prepare.call(this, source);
+      for (const method of TRACED_METHODS) {
+        const execute = statement[method] as (...params: unknown[]) => unknown;
+        statement[method] = (...params: unknown[]) => {
+          queries.push({ sql: source, params });
+          return execute.apply(statement, params);
+        };
+      }
+      return statement;
+    },
+  });
+  return {
+    queries,
+    stop: () => {
+      Reflect.deleteProperty(sqlite, 'prepare');
+    },
+  };
 }
 
 function registerTestRoutes(
@@ -151,6 +193,7 @@ export async function boot(
       sqlite,
       db,
       calls,
+      traceQueries: () => traceQueries(sqlite),
       stop: async () => {
         if (stopped) return;
         stopped = true;

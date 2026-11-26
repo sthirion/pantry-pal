@@ -38,8 +38,18 @@ const { startServer } = await load('server.js');
 const seed = JSON.parse(
   fs.readFileSync(path.join(here, 'personas.json'), 'utf8'),
 );
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pantry-pal-e2e-'));
-const dbPath = path.join(tmp, 'pantry.db');
+// E2E_DB_PATH (set by playwright.config.ts) lets specs open this database; without it a throwaway temp directory is used.
+const configuredDbPath = process.env.E2E_DB_PATH;
+const tmp = configuredDbPath
+  ? undefined
+  : fs.mkdtempSync(path.join(os.tmpdir(), 'pantry-pal-e2e-'));
+const dbPath = configuredDbPath ?? path.join(tmp, 'pantry.db');
+function removeDatabaseFiles() {
+  for (const suffix of ['', '-wal', '-shm']) {
+    fs.rmSync(`${dbPath}${suffix}`, { force: true });
+  }
+}
+removeDatabaseFiles();
 
 const sqlite = openSqlite(dbPath);
 const db = createDatabase(sqlite);
@@ -59,6 +69,23 @@ for (const persona of Object.values(seed.personas)) {
     },
     async () => persona.password,
   );
+}
+// One two-member household per Playwright worker for the sync journeys (see syncPair in src/journeys.ts).
+for (let index = 0; index < Number(process.env.E2E_WORKERS ?? 0); index++) {
+  const household = createHousehold(db, {
+    name: `${seed.syncPair.household} ${index}`,
+  });
+  for (const member of [seed.syncPair.sam, seed.syncPair.alex]) {
+    await createUser(
+      db,
+      {
+        email: `${member.emailPrefix}-${index}@example.com`,
+        name: member.name,
+        household,
+      },
+      async () => member.password,
+    );
+  }
 }
 const now = Date.now();
 seed.suggestions.forEach((name, index) => {
@@ -86,7 +113,8 @@ const server = startServer({
 
 function shutdown() {
   server.close();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  else removeDatabaseFiles();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);

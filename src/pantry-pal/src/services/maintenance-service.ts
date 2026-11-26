@@ -1,6 +1,7 @@
-import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, lt, lte, max, sql } from 'drizzle-orm';
 import type { AppDatabase } from '../db/database.js';
 import {
+  itemChange,
   listItem,
   maintenanceState,
   shoppingList,
@@ -9,6 +10,9 @@ import {
 
 export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const OVERDUE_AFTER_MS = 24 * 60 * 60 * 1000;
+/** 24 hours of required history plus a one-hour safety margin. */
+export const JOURNAL_RETENTION_MS = 25 * 60 * 60 * 1000;
+export const JOURNAL_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const STATE_ID = 1;
 
 export interface PurgeResult {
@@ -91,6 +95,35 @@ export class MaintenanceService {
     });
   }
 
+  /**
+   * Deletes item journal entries at least 25 hours old and raises each affected item's pruning watermark
+   * to its greatest deleted revision, in one transaction. Returns the number of entries deleted.
+   */
+  pruneItemJournal(): number {
+    const cutoff = this.now() - JOURNAL_RETENTION_MS;
+    return this.db.transaction((tx) => {
+      const expired = lte(itemChange.createdAt, cutoff);
+      const watermarks = tx
+        .select({
+          itemId: itemChange.itemId,
+          through: max(itemChange.itemRevision),
+        })
+        .from(itemChange)
+        .where(expired)
+        .groupBy(itemChange.itemId)
+        .all();
+      for (const { itemId, through } of watermarks) {
+        tx.update(listItem)
+          .set({
+            prunedThroughItemRevision: sql`max(${listItem.prunedThroughItemRevision}, ${through})`,
+          })
+          .where(eq(listItem.id, itemId))
+          .run();
+      }
+      return tx.delete(itemChange).where(expired).run().changes;
+    });
+  }
+
   /** True when the purge never ran or last ran more than 24 hours ago. */
   isOverdue(): boolean {
     const row = this.db
@@ -100,6 +133,33 @@ export class MaintenanceService {
       .get();
     return !row || this.now() - row.lastRunAt > OVERDUE_AFTER_MS;
   }
+}
+
+/**
+ * Prunes the item journal at startup and then every hour. Returns a function that stops it.
+ */
+export function startJournalPruneScheduler(
+  service: MaintenanceService,
+  {
+    intervalMs = JOURNAL_PRUNE_INTERVAL_MS,
+    onError = console.error,
+  }: { intervalMs?: number; onError?: (error: unknown) => void } = {},
+): () => void {
+  const run = () => {
+    try {
+      service.pruneItemJournal();
+    } catch (error) {
+      try {
+        onError(error);
+      } catch {
+        // A failing error handler must never break the scheduler.
+      }
+    }
+  };
+  run();
+  const timer = setInterval(run, intervalMs);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 /** Milliseconds from `nowMs` until the next 03:30 UTC (always positive). */
