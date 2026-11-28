@@ -3,6 +3,7 @@ import { Outlet } from 'react-router';
 import { useSignOut } from '../hooks/useSignOut';
 import { useSyncEngine } from '../hooks/useSyncEngine';
 import { SyncStatus } from './SyncStatus';
+import { AppLogo } from './AppLogo';
 
 export function AppShell() {
   const { t } = useTranslation();
@@ -11,7 +12,7 @@ export function AppShell() {
   return (
     <>
       <header className="app-header">
-        <span className="app-title">{t('app.name')}</span>
+        <AppLogo />
         <button
           type="button"
           className="button button--secondary"

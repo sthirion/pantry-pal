@@ -110,13 +110,13 @@ function hiddenPrompt(label: string): Promise<string> {
     const rlWithWrite = rl as unknown as {
       _writeToOutput: (text: string) => void;
     };
-    process.stdout.write(label);
-    rlWithWrite._writeToOutput = () => undefined;
-    rl.question('', (answer) => {
+    // question() writes the label synchronously and redraws the line, so mute echo only afterwards.
+    rl.question(label, (answer) => {
       rl.close();
       process.stdout.write('\n');
       resolve(answer);
     });
+    rlWithWrite._writeToOutput = () => undefined;
   });
 }
 

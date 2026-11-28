@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { signInFailureFor, useSignIn } from '../hooks/useSignIn';
+import { AppLogo } from '../components/AppLogo';
 
 export function SignInPage() {
   const { t } = useTranslation();
@@ -26,6 +27,7 @@ export function SignInPage() {
 
   return (
     <main className="screen">
+      <AppLogo size="large" />
       <form
         className="card"
         onSubmit={onSubmit}

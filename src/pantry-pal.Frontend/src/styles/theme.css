@@ -12,6 +12,8 @@
   --color-error: #ff9a9a;
   --color-border: #8c8c8c;
   --color-focus: #ffd166;
+  --color-frame-start: #3ddbd9;
+  --color-frame-end: #a855f7;
 }
 
 @media (prefers-color-scheme: light) {
@@ -25,5 +27,7 @@
     --color-error: #b00020;
     --color-border: #767676;
     --color-focus: #0b3d91;
+    --color-frame-start: #1aa8a6;
+    --color-frame-end: #7e22ce;
   }
 }

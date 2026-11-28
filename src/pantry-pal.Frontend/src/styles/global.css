@@ -25,6 +25,27 @@ body {
   line-height: 1.5;
 }
 
+/* Decorative gradient frame around the viewport; it never intercepts input. */
+body::before {
+  position: fixed;
+  inset: 4px;
+  z-index: 1000;
+  border: 3px solid transparent;
+  border-radius: 1rem;
+  background: linear-gradient(
+      160deg,
+      var(--color-frame-start),
+      var(--color-frame-end)
+    )
+    border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  content: '';
+  pointer-events: none;
+}
+
 :focus-visible {
   outline: 3px solid var(--color-focus);
   outline-offset: 2px;
@@ -152,6 +173,30 @@ body {
   gap: 1rem;
   padding: 0.75rem 1rem;
   background: var(--color-surface);
+}
+
+.app-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.app-logo__mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 22%;
+}
+
+.app-logo--large {
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 1.5rem;
+}
+
+.app-logo--large .app-logo__mark {
+  width: 5rem;
+  height: 5rem;
 }
 
 .app-header h1 {
