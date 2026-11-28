@@ -55,7 +55,7 @@ In the hetzner-deploy checkout:
 Invoke-Pester -Path tests
 ```
 
-The `pantry-pal site manifest` tests check the node-systemd and database settings and fail if `install` contains `--ignore-scripts`. The install script of `better-sqlite3` must run on the server to fetch its prebuilt binary, so that flag is never allowed for this site.
+The `pantry-pal site manifest` tests check the node-systemd and database settings and require the exact approved `install` command, which includes `--ignore-scripts`. `better-sqlite3` 13 bundles its prebuilt binaries, but the server's npm 10 would otherwise run `node-gyp rebuild` and fail because no compiler is installed. Re-check this if `better-sqlite3` is upgraded or another dependency needs an install script.
 
 In the pantry-pal checkout:
 
